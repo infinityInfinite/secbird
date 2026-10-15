@@ -195,6 +195,9 @@ impl Device {
 
     /// Battery percentage, or `None` for wired-only devices.
     pub fn battery(&self) -> Result<Option<u8>> {
+        if crate::headset::is_headset(self.pid) {
+            return self.headset_query(crate::headset::BATTERY).map(Some);
+        }
         if !self.spec.as_ref().is_some_and(|s| s.wireless) {
             return Ok(None);
         }
@@ -203,6 +206,9 @@ impl Device {
     }
 
     pub fn charging(&self) -> Result<bool> {
+        if crate::headset::is_headset(self.pid) {
+            return self.headset_query(crate::headset::CHARGING).map(|n| n != 0);
+        }
         let r = self.get(cmd::CHARGING, cmd::POWER_SIZE, &[])?;
         Ok(r.args()[1] != 0)
     }

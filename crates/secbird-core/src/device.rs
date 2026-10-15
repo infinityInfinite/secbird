@@ -61,7 +61,26 @@ impl Device {
     /// Send one command and wait for its reply. `size` is the argument length the
     /// device expects for this command.
     pub fn transact(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
+        if crate::headset::is_headset(self.pid) {
+            return Err(Error::Unsupported("this headset speaks HID audio reports, not Protocol 2.5".into()));
+        }
         transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES)
+    }
+
+    /// A read-only GET on a headset's own protocol ([`crate::headset`]).
+    pub(crate) fn headset_query(&self, command: u8) -> Result<u8> {
+        if !crate::headset::is_headset(self.pid) {
+            return Err(Error::Unsupported("HID audio reports on this device".into()));
+        }
+        crate::headset::query(self.transport.as_ref(), command)
+    }
+
+    /// One headset request with arguments, answered by the headset.
+    pub(crate) fn headset_transact(&self, command: u8, args: &[u8]) -> Result<Vec<u8>> {
+        if !crate::headset::is_headset(self.pid) {
+            return Err(Error::Unsupported("HID audio reports on this device".into()));
+        }
+        crate::headset::transact(self.transport.as_ref(), command, args)
     }
 
     /// [`Device::transact`] for commands that write flash and answer slowly.
@@ -154,6 +173,8 @@ pub fn candidates(api: &HidApi) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = api
         .device_list()
         .filter(|d| d.vendor_id() == RAZER_VID)
+        // Audio headsets only speak their own protocol, and only on the vendor collection.
+        .filter(|d| !crate::headset::is_headset(d.product_id()) || (d.usage_page() == 0xFF14 && d.usage() == 1))
         .map(|d| Candidate {
             pid: d.product_id(),
             interface: d.interface_number(),
@@ -228,6 +249,13 @@ impl Device {
         txids: &[u8],
         spec: Option<DeviceSpec>,
     ) -> Option<Device> {
+        if crate::headset::is_headset(pid) {
+            // Headsets have no Protocol 2.5 serial; a battery read proves it answers, and
+            // gives the device its key along the way.
+            let dev = Device { transport, pid, serial: String::new(), interface, path, txid: 0x60, spec };
+            dev.headset_query(crate::headset::BATTERY).ok()?;
+            return Some(dev);
+        }
         let (txid, reply) = txids.iter().copied().find_map(|t| {
             transact(transport.as_ref(), t, cmd::SERIAL.get(), cmd::SERIAL_SIZE, &[], READ_RETRIES).ok().map(|r| (t, r))
         })?;

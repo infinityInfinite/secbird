@@ -10,6 +10,18 @@ fn zone<'a>(store: &'a mut Store, dev: &Device, name: &str) -> &'a mut Zone {
     store.for_device(dev).active_mut().lighting.entry(name.to_string()).or_default()
 }
 
+/// One headset setting: send it, let the headset confirm it, then record it in the active
+/// profile. A microphone preset carries its own bands, so those are read back and saved too.
+pub fn set_audio(dev: &Device, store: &mut Store, name: &str, values: Vec<i16>) -> Result<()> {
+    dev.audio_set(name, &values)?;
+    if name == "mic-preset" {
+        let bands = dev.audio_read("mic-eq")?;
+        store.for_device(dev).active_mut().audio.insert("mic-eq".into(), bands);
+    }
+    store.for_device(dev).active_mut().audio.insert(name.into(), values);
+    store.save()
+}
+
 /// Returns the DPI actually set, after rounding to the device's step.
 pub fn set_dpi(dev: &Device, store: &mut Store, x: u16, y: u16) -> Result<(u16, u16)> {
     let applied = dev.set_dpi(x, y)?;

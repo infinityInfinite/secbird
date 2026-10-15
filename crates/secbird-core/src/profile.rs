@@ -55,6 +55,10 @@ pub struct Profile {
     /// Buttons not listed keep their saved on-board setting.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub buttons: BTreeMap<String, String>,
+    /// Headset hardware settings by name (`anc`, `mic-eq`, `eq-2`, ...), see
+    /// [`crate::headset`]. Written back to the headset when the profile is applied.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub audio: crate::headset::Settings,
 }
 
 /// `C:\Games\CS2.exe`, `cs2` or ` CS2.EXE ` -> `cs2.exe`. Empty when nothing is left.
@@ -315,6 +319,11 @@ impl Profile {
                 dev.set_button(id, layer, action).map(|_| ())
             });
             push(format!("{key} -> {action}"), result);
+        }
+        // Headset settings, presets before bands: switching a preset resets that EQ's bands.
+        for (name, values) in self.audio.iter().filter(|(n, _)| n.ends_with("preset"))
+            .chain(self.audio.iter().filter(|(n, _)| !n.ends_with("preset"))) {
+            push(format!("audio {name}"), dev.audio_set(name, values));
         }
         out
     }

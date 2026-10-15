@@ -261,6 +261,9 @@ struct Body {
     action: String,
     #[serde(default)]
     name: String,
+    /// Headset settings: the setting name and its new values.
+    #[serde(default)]
+    values: Vec<i16>,
     #[serde(default)]
     keys: Vec<String>,
     #[serde(default)]
@@ -356,6 +359,10 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 Ok(json!({ "dpi": [x, y] }))
             }
             "/api/polling" => actions::set_polling(dev, &mut store, b.hz).map(|_| json!({})),
+            "/api/audio" => {
+                actions::set_audio(dev, &mut store, &b.name, b.values.clone())?;
+                Ok(json!({ "device": device_json(dev) }))
+            }
             "/api/stages" => {
                 let want = secbird_core::DpiStages { active: b.active, stages: b.stages.clone() };
                 let sent = actions::set_dpi_stages(dev, &mut store, &want)?;
@@ -608,6 +615,7 @@ fn sleep_json(dev: &Device) -> Value {
 }
 
 fn device_json(dev: &Device) -> Value {
+    let (audio, audio_errors) = dev.audio_state();
     let spec = dev.spec.as_ref();
     let (profile_names, active) = Engine::profiles(dev);
     let all = Store::load(&config_dir().join("profiles.json")).ok().map(|mut s| s.for_device(dev).clone());
@@ -665,6 +673,8 @@ fn device_json(dev: &Device) -> Value {
         "active": active,
         "profile": profile,
         "profilesData": profiles_data,
+        "audio": audio,
+        "audio_errors": audio_errors,
     })
 }
 
