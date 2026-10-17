@@ -241,7 +241,7 @@
 {"pid":"02C5","name":"Blade 14 (2025)","kind":"laptop","txid":"FF","lighting":"standard","leds":[{"name":"backlight","id":5}],"matrix":{"rows":6,"cols":16},"source":"openrazer"},
 {"pid":"02C6","name":"Blade 16 (2025)","kind":"laptop","txid":"FF","lighting":"standard","leds":[{"name":"backlight","id":5}],"matrix":{"rows":6,"cols":17},"source":"openrazer"},
 {"pid":"02C7","name":"Blade 18 (2025)","kind":"laptop","txid":"FF","lighting":"standard","leds":[{"name":"backlight","id":5}],"matrix":{"rows":6,"cols":19},"source":"openrazer"},
-{"pid":"02C9","name":"BlackWidow V4 Low-Profile HyperSpeed","kind":"keyboard","interface":2,"txid":"FF","wireless":true,"lighting":"extended","leds":[{"name":"backlight","id":5}],"source":"user report; verified on hardware with Secretarybird 0.4.5"}
+{"pid":"02C9","name":"BlackWidow V4 Low-Profile HyperSpeed","kind":"keyboard","interface":2,"txid":"FF","wireless":true,"lighting":"extended","leds":[{"name":"backlight","id":5}],"source":"user report; verified on hardware with Secretarybird 0.4.5"},
 {"pid":"02CD","name":"Joro","kind":"keyboard","txid":"1F","lighting":"extended","leds":[{"name":"backlight","id":5}],"matrix":{"rows":6,"cols":16},"wireless":true,"source":"openrazer"},
 {"pid":"02CF","name":"Huntsman V3 Pro 8KHz","kind":"keyboard","txid":"1F","lighting":"extended","leds":[{"name":"backlight","id":5}],"matrix":{"rows":6,"cols":22},"source":"openrazer"},
 {"pid":"02D5","name":"BlackWidow V4 Tenkeyless HyperSpeed (Wireless)","kind":"keyboard","txid":"9F","polling":"standard","lighting":"extended","leds":[{"name":"backlight","id":5}],"matrix":{"rows":6,"cols":18},"wireless":true,"source":"openrazer"},
