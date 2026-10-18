@@ -686,11 +686,11 @@ fn device_json(dev: &Device) -> Value {
             .then(|| dev.dpi().ok())
             .flatten()
             .map(|(x, y)| json!({
-            "x": x, "y": y,
-            "min": dpi_range.map_or(100, |r| r.min),
-            "max": dpi_range.map_or(20000, |r| r.max),
-            "step": dpi_range.map_or(50, |r| r.step),
-        })),
+                "x": x, "y": y,
+                "min": dpi_range.map_or(100, |r| r.min),
+                "max": dpi_range.map_or(20000, |r| r.max),
+                "step": dpi_range.map_or(50, |r| r.step),
+            })),
         // Mousepads and docks answer the polling question too, but have no polling rate to
         // set: only show it where the device list says there is one (or the model is unknown).
         "polling": spec
