@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Secretarybird</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="home.css">
+  <link rel="stylesheet" href="devices.css">
+  <script defer src="i18n.js"></script>
+  <script defer src="locales/en.js"></script>
+  <script defer src="device-registry.js"></script>
+  <script defer src="registry.js"></script>
+  <script defer src="model.js"></script>
+  <script defer src="discovery.js"></script>
+  <script defer src="device-assets.js"></script>
+  <script defer src="visuals.js"></script>
+  <script defer src="components.js"></script>
+  <script defer src="home.js"></script>
+  <script defer src="devices.js"></script>
+  <script defer src="identity.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="desktop-chrome">
+    <div class="window-tabs" data-tauri-drag-region><button class="application-tab" data-page="dashboard"><img class="brand-logo" src="assets/secbird.png" alt=""> SECBIRD</button><span id="device-window-tab"></span><span class="title-drag" data-tauri-drag-region></span><div class="window-controls"><button data-window="minimize" aria-label="Minimize" disabled>─</button><button data-window="maximize" aria-label="Maximize or restore" disabled>□</button><button data-window="close" aria-label="Close window" disabled>×</button></div></div>
+    <div class="workspace-toolbar"><div class="history-controls"><button data-history="back" aria-label="Back" disabled>‹</button><button data-history="forward" aria-label="Forward" disabled>›</button><button id="scan-devices" aria-label="Refresh devices" title="Refresh connected devices">⟳</button></div><span id="workspace-title" class="workspace-name">SECBIRD</span><div class="workspace-tools"><button data-page="profiles" class="profiles-toolbar" aria-label="Local profiles" title="Local profiles"><span class="profiles-nav-icon"></span></button><button data-page="settings" aria-label="Settings" title="Settings">⚙</button><button id="local-avatar" class="local-avatar" aria-label="Customize profile icon" title="Customize profile icon">S</button></div></div>
+    <nav class="home-navigation" aria-label="HOME"><button data-home-tab="dashboard" class="selected" aria-current="page">DASHBOARD</button><button data-home-tab="room">GAMER ROOM</button><button data-home-tab="modules">DEVICES &amp; MODULES</button><button data-home-tab="shortcuts">GLOBAL SHORTCUTS</button></nav>
+  </header>
+  <div class="shell">
+    <main id="main" tabindex="-1"></main>
+  </div>
+  <footer hidden><span>Preview data · Settings saved locally only</span><span>Independent of Razer · Secretarybird by infinityInfinite</span></footer>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="profile-dialog"><form id="profile-form"><h2 id="dialog-title">New profile</h2><label>Profile name<input id="profile-name" maxlength="40" required autocomplete="off"></label><p id="profile-error" role="alert"></p><div class="actions"><button type="button" id="cancel-dialog">Cancel</button><button class="primary" type="submit">Save</button></div></form></dialog>
+</body>
+</html>

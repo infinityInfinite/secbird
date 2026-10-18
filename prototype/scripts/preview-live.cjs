@@ -1,0 +1,53 @@
+const {chromium}=require('playwright-core');
+const fs=require('node:fs');
+const path=require('node:path');
+const assert=require('node:assert/strict');
+(async()=>{
+ const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true,args:['--disable-background-networking','--no-first-run']});
+ try{
+ const page=await browser.newPage({viewport:{width:1280,height:900},deviceScaleFactor:1});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:4173');
+ await page.waitForFunction(()=>HardwareSource.state!=='loading');
+ const actual=await page.evaluate(()=>DeviceRegistry.all.map(d=>({id:d.id,pid:d.pid,name:d.name})));
+ assert.ok(actual.length>0,'Actual enumeration should return devices on this machine');
+ assert.equal(await page.locator('.home-device-card').count(),actual.length);
+ assert.equal(await page.locator('.workspace-tools button').count(),3);
+ assert.equal(await page.locator('.title-navigation,.demo-indicator,.workspace-tools [data-home-tab]').count(),0);
+ assert.equal(await page.locator('.home-battery').count(),0);
+ fs.mkdirSync(path.resolve(__dirname,'../artifacts'),{recursive:true});
+ await page.screenshot({path:path.resolve(__dirname,'../artifacts/home-dashboard.png')});
+ await page.locator('#local-avatar').click();await page.locator('#avatar-text').fill('ME');await page.locator('#avatar-save').click();
+ assert.equal(await page.locator('html').getAttribute('lang'),'en');
+ assert.equal(await page.locator('#main h1').textContent(),'Settings');
+ assert.equal(await page.locator('[data-import-visual],[data-reset-visual]').count(),0);
+ assert.equal(await page.locator('#main input[type=file]').count(),1,'Only avatar image import belongs in settings');
+ await page.evaluate(()=>{I18n.register('fr',{'Settings':'Paramètres','Local profiles':'Profils locaux'});I18n.setLocale('fr');});
+ assert.equal(await page.locator('#main h1').textContent(),'Paramètres');
+ assert.equal(await page.locator('.profiles-toolbar').getAttribute('title'),'Profils locaux');
+ assert.equal(await page.evaluate(()=>I18n.t('Missing {name}',{name:'translation'})),'Missing translation');
+ await page.evaluate(()=>I18n.setLocale('en'));
+ assert.equal(await page.locator('#main h1').textContent(),'Settings');
+ assert.equal(await page.locator('.profiles-toolbar').getAttribute('title'),'Local profiles');
+ assert.equal(await page.locator('#local-avatar').textContent(),'ME');
+ await page.locator('#avatar-image').setInputFiles(path.resolve(__dirname,'../ui/assets/secbird.png'));
+ await page.waitForSelector('#local-avatar img');
+ await page.reload();await page.waitForFunction(()=>HardwareSource.state==='ready');assert.equal(await page.locator('#local-avatar img').count(),1);
+ await page.locator('#local-avatar').click();await page.locator('#avatar-reset').click();
+ await page.locator('.profiles-toolbar').click();assert.equal(await page.locator('[data-profile-device]').count(),actual.length);
+ await page.screenshot({path:path.resolve(__dirname,'../artifacts/profiles.png')});
+ await page.locator('.application-tab').click();await page.locator('.home-device-card').first().click();
+ assert.equal(await page.locator('#device-content fieldset:disabled').count(),1);
+ await page.locator('[data-history="back"]').click();assert.equal(await page.locator('.home-device-card').count(),actual.length);
+ // Empty and error responses must never resurrect a static demo card.
+ await page.route('**/api/devices',route=>route.fulfill({contentType:'application/json',body:'[]'}));
+ await page.locator('#scan-devices').first().click();await page.waitForFunction(()=>HardwareSource.state==='ready'&&DeviceRegistry.all.length===0);
+ assert.equal(await page.locator('.home-device-card').count(),0);
+ await page.locator('.profiles-toolbar').click();assert.match(await page.locator('#main').textContent(),/No Razer device/);
+ await page.unroute('**/api/devices');await page.locator('#scan-devices').first().click();await page.waitForFunction(()=>HardwareSource.state==='ready'&&DeviceRegistry.all.length>0);
+ await page.locator('.application-tab').click();await page.setViewportSize({width:820,height:600});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await page.screenshot({path:path.resolve(__dirname,'../artifacts/home-compact.png')});
+ assert.deepEqual(errors,[]);
+ console.log(JSON.stringify({status:'PASS',actualDevices:actual,checks:['real passive API','toolbar restored without six-dot control','avatar text/image and persistence','no fake batteries','empty list has no demo fallback','read-only device settings','navigation','820px layout']}));
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

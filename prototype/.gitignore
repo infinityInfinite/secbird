@@ -1,0 +1,10 @@
+node_modules/
+src-tauri/target/
+measurements/
+.npm-cache/
+.toolchain/
+src-tauri/gen/
+# Keep only current, representative proposal screenshots.
+artifacts/*
+!artifacts/home-dashboard.png
+!artifacts/home-compact.png

@@ -1,0 +1,19 @@
+{
+  "name": "secbird-desktop-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated offline desktop UI experiment; no hardware access",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "web": "npm run prepare:ui && node scripts/web.cjs",
+    "dev": "npm run prepare:ui && tauri dev",
+    "build": "npm run prepare:ui && tauri build --no-bundle",
+    "bundle": "npm run prepare:ui && tauri build",
+    "check": "node --check ui/app.js && node --test tests/model.test.cjs",
+    "prepare:ui": "node scripts/sync-device-registry.cjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "playwright-core": "^1.64.1"
+  }
+}

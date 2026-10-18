@@ -1,0 +1,4 @@
+# Reference images remain local; do not accidentally redistribute proprietary UI captures.
+*
+!.gitignore
+!README.md
