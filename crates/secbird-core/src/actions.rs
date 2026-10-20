@@ -25,6 +25,25 @@ fn check_lighting(dev: &Device, store: &mut Store) -> Result<()> {
     Ok(())
 }
 
+/// One headset setting: send it, let the headset confirm it, then record it in the active
+/// profile. When the headset already reports the same values nothing is written; the
+/// confirmed values are returned, so callers don't need another read to show them.
+/// A microphone preset carries its own bands, so those are read back and saved too.
+pub fn set_audio(dev: &Device, store: &mut Store, name: &str, values: Vec<i16>) -> Result<Vec<i16>> {
+    if dev.audio_read(name).ok() == Some(values.clone()) {
+        store.for_device(dev).active_mut().audio.insert(name.into(), values.clone());
+        store.save()?;
+        return Ok(values);
+    }
+    dev.audio_set(name, &values)?;
+    if name == "mic-preset" {
+        let bands = dev.audio_read("mic-eq")?;
+        store.for_device(dev).active_mut().audio.insert("mic-eq".into(), bands);
+    }
+    store.for_device(dev).active_mut().audio.insert(name.into(), values.clone());
+    store.save()?;
+    Ok(values)
+}
 /// Returns the DPI actually set, after rounding to the device's step.
 pub fn set_dpi(dev: &Device, store: &mut Store, x: u16, y: u16) -> Result<(u16, u16)> {
     let applied = dev.set_dpi(x, y)?;

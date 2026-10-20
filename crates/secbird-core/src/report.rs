@@ -119,7 +119,10 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
     for info in infos {
         let pid = info.product_id();
         let spec = db.get(pid).cloned();
-        let dev = api.open_path(info.path()).ok().and_then(|hid| {
+        // A headset only answers on its vendor collection; its other interfaces would
+        // open as Protocol 2.5 and fail.
+        let audio = !crate::headset::is_headset(pid) || (info.usage_page() == 0xFF14 && info.usage() == 1);
+        let dev = audio.then(|| api.open_path(info.path()).ok()).flatten().and_then(|hid| {
             Device::open(Box::new(hid), pid, info.interface_number(), info.path().to_owned(), &TXID_CANDIDATES, spec)
         });
         interfaces.push(Interface {
@@ -148,6 +151,36 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
 
 /// Send every read-only probe to one device.
 pub fn probe(dev: &Device, simulated: bool) -> DeviceReport {
+    if crate::headset::is_headset(dev.pid) {
+        let mut probes: Vec<Probe> = [("battery", crate::headset::BATTERY), ("charging", crate::headset::CHARGING)]
+            .into_iter()
+            .map(|(name, command)| {
+                let (status, reply) = match dev.headset_query(command) {
+                    Ok(value) => ("ok".to_string(), format!("{value:02X}")),
+                    Err(e) => (e.to_string(), String::new()),
+                };
+                Probe { name, command: format!("HID64:{command:02X} GET"), status, reply }
+            })
+            .collect();
+        for &(key, label, command) in crate::headset::SETTINGS {
+            let (status, reply) = match dev.audio_read(key) {
+                Ok(values) => ("ok".to_string(), values.iter().map(i16::to_string).collect::<Vec<_>>().join(" ")),
+                Err(e) => (e.to_string(), String::new()),
+            };
+            probes.push(Probe { name: label, command: format!("HID64:{command:02X} GET"), status, reply });
+        }
+        return DeviceReport {
+            pid: format!("{:04X}", dev.pid),
+            name: dev.name(),
+            in_database: dev.spec.is_some(),
+            simulated,
+            interface: dev.interface,
+            txid: String::new(),
+            serial: String::new(),
+            probes,
+            leds: Vec::new(),
+        };
+    }
     let laptop = dev.spec.as_ref().is_none_or(|s| s.kind == crate::Kind::Laptop);
     let probes = PROBES
         .iter()
@@ -207,7 +240,20 @@ impl std::fmt::Display for Report {
             writeln!(f, "  (none)")?;
         }
         for i in &self.interfaces {
-            let answers = i.txid.as_ref().map(|t| format!("  <- answers Protocol 2.5 (txid {t})")).unwrap_or_default();
+            let protocol = if crate::headset::is_headset(u16::from_str_radix(&i.pid, 16).unwrap_or(0)) {
+                "its own HID audio reports"
+            } else {
+                "Protocol 2.5"
+            };
+            // Only the interface that was actually opened carries a transaction id, so an
+            // untouched interface is never reported as answering.
+            let answers = i.txid.as_ref().map(|t| {
+                if protocol == "Protocol 2.5" {
+                    format!("  <- answers {protocol} (id {t})")
+                } else {
+                    format!("  <- answers {protocol}")
+                }
+            }).unwrap_or_default();
             writeln!(f, "  {}  interface {:<2} usage {}:{}{answers}", i.pid, i.interface, i.usage_page, i.usage)?;
         }
 
@@ -218,7 +264,11 @@ impl std::fmt::Display for Report {
                 (false, false) => "NOT in database",
             };
             writeln!(f, "\nDevice {} {} ({known})", d.pid, d.name)?;
-            writeln!(f, "  interface {}, txid {}, serial {}", d.interface, d.txid, d.serial)?;
+            if d.txid.is_empty() {
+                writeln!(f, "  interface {}, no serial (it answers its own HID audio reports)", d.interface)?;
+            } else {
+                writeln!(f, "  interface {}, txid {}, serial {}", d.interface, d.txid, d.serial)?;
+            }
             for p in &d.probes {
                 writeln!(f, "  {:<26} {}  {:<12} {}", p.name, p.command, p.status, p.reply)?;
             }

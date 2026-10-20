@@ -36,6 +36,10 @@ SETTINGS (saved to the active profile):
                             starlight:RRGGBB[,RRGGBB]|random[@1-3]
   keys <RRGGBB>             Every key one color (keyboards with per-key lighting)
   sync <RRGGBB>             Same color everywhere (skips devices with lighting control off)
+  audio [SETTING [VALUES...]]
+                            Headset hardware: no arguments lists every setting, one
+                            reads it, more set it (e.g. `audio anc 1 3`)
+
 
 BUTTONS (mice with on-board button memory; add --hypershift for the HyperShift layer):
   button [list]             Buttons and what they do now
@@ -192,6 +196,9 @@ Download: {}", r.version, secbird_core::update::CURRENT, r.url),
         }
         for pid in secbird_core::device::unanswered(&api, &devices).into_iter().filter(|p| selects(*p, "", "")) {
             match db.get(pid) {
+                Some(spec) if secbird_core::headset::is_headset(pid) => {
+                    println!("{pid:04X}  {}  (connected but not answering. Is it switched on? Is Synapse running?)", spec.name)
+                }
                 Some(spec) if spec.lighting == secbird_core::Lighting::Kraken => {
                     println!("{pid:04X}  {}  (connected; its headset protocol isn't supported yet)", spec.name)
                 }
@@ -279,6 +286,34 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
             println!("Lighting control: {}", if store.for_device(dev).lighting_off { "off (RGB left untouched)" } else { "on" });
             Ok(())
         }
+        // Headset hardware settings: no arguments lists them, one reads, more set.
+        "audio" => match rest {
+            [] => {
+                if !secbird_core::headset::is_headset(dev.pid) {
+                    return Err(Error::Unsupported(format!("{} has no headset settings", dev.name())));
+                }
+                for &(key, label, _) in secbird_core::headset::SETTINGS {
+                    match dev.audio_read(key) {
+                        Ok(values) => println!("  {key:<12} {}", values.iter().map(i16::to_string).collect::<Vec<_>>().join(" ")),
+                        Err(e) => println!("  {key:<12} {e}  ({label})"),
+                    }
+                }
+                Ok(())
+            }
+            [name] => {
+                println!("{}", dev.audio_read(name)?.iter().map(i16::to_string).collect::<Vec<_>>().join(" "));
+                Ok(())
+            }
+            [name, values @ ..] => {
+                let values: Vec<i16> = values
+                    .iter()
+                    .map(|v| v.parse().map_err(|_| Error::InvalidArg(format!("'{v}' is not a number"))))
+                    .collect::<Result<_, _>>()?;
+                let confirmed = actions::set_audio(dev, &mut store, name, values)?;
+                println!("Set {name}; the headset now reports {}", confirmed.iter().map(i16::to_string).collect::<Vec<_>>().join(" "));
+                Ok(())
+            }
+        },
         "battery" => match dev.battery()? {
             None => {
                 println!("Wired device, no battery.");
@@ -614,7 +649,7 @@ fn button_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Er
 
 fn report_apply(results: Vec<secbird_core::profile::Applied>) -> Result<(), Error> {
     if results.is_empty() {
-        println!("Nothing to apply: the profile has no recorded settings yet.");
+        println!("Nothing to send: the profile is empty or the device already matches it.");
     }
     let mut failed = 0;
     for r in &results {
@@ -643,6 +678,17 @@ fn dimming_text(d: secbird_core::Dimming) -> &'static str {
 }
 
 fn info(dev: &Device, store: &mut Store) -> Result<(), Error> {
+    if secbird_core::headset::is_headset(dev.pid) {
+        println!("Device    {} ({:04X})", dev.name(), dev.pid);
+        println!("Battery   {}%{}", dev.battery()?.unwrap_or(0), if dev.charging()? { " (charging)" } else { "" });
+        for &(key, label, _) in secbird_core::headset::SETTINGS {
+            match dev.audio_read(key) {
+                Ok(values) => println!("  {key:<12} {}  ({label})", values.iter().map(i16::to_string).collect::<Vec<_>>().join(" ")),
+                Err(e) => println!("  {key:<12} {e}  ({label})"),
+            }
+        }
+        return Ok(());
+    }
     let (major, minor) = dev.firmware()?;
     println!("Device    {} ({:04X})", dev.name(), dev.pid);
     println!("Serial    {}", dev.serial()?);

@@ -20,6 +20,7 @@ pub mod effects;
 pub mod error;
 pub mod firmware;
 pub mod features;
+pub mod headset;
 pub mod log;
 pub mod macros;
 pub mod net;
