@@ -256,6 +256,7 @@ fn discover_hid(api: &HidApi, db: &Db) -> Vec<Device> {
     pids.dedup();
 
     pids.into_iter()
+        .filter(|pid| !db.get(*pid).is_some_and(|spec| spec.kind == Kind::Webcam))
         .filter_map(|pid| -> Option<Vec<Device>> {
             let spec = db.get(pid).cloned();
             let mut ifaces: Vec<&Candidate> = all.iter().filter(|c| c.pid == pid).collect();

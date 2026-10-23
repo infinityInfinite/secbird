@@ -27,6 +27,9 @@ pub struct Zone {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
+    /// UVC controls; absent fields leave the camera unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<crate::camera::CameraSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dpi: Option<(u16, u16)>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -305,6 +308,10 @@ impl Store {
 
     pub fn for_device(&mut self, dev: &crate::Device) -> &mut DeviceProfiles {
         self.profiles_for(&dev.key(), dev.pid)
+    }
+
+    pub fn for_camera(&mut self, id: &str) -> &mut DeviceProfiles {
+        self.devices.entry(id.to_owned()).or_default()
     }
 
     pub fn device(&mut self, pid: u16) -> &mut DeviceProfiles {

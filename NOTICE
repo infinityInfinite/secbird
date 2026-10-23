@@ -6,5 +6,10 @@ documented by the OpenRazer project (https://github.com/openrazer/openrazer,
 GPL-2.0), checkout 477f4d6 from 2026-10-05. The facts were extracted with
 tools/restate_openrazer.py; no OpenRazer code is included or executed.
 
+The Kiyo Pro USB identity, extension-unit GUID and control payload facts are
+restated from https://github.com/soyersoyer/kiyoproctrls (MIT). Its Python source
+is not included or executed; the Rust implementation independently encodes the
+documented device protocol.
+
 Razer, Synapse, Chroma and product names are trademarks of Razer Inc. Secretarybird
 is an independent project and is not affiliated with or endorsed by Razer.

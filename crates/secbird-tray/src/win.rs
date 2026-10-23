@@ -480,7 +480,7 @@ impl App {
             let mut engine = self.engine();
             let new = engine.rescan();
             let names: Vec<String> =
-                engine.devices().iter().filter(|d| new.contains(&d.key())).map(|d| engine.label(d)).collect();
+                engine.profile_devices().into_iter().filter(|d| new.contains(&d.id)).map(|d| d.label).collect();
             let targets = if apply_all { engine.all_keys() } else { new };
             (engine.apply(&targets), names, engine.synapse().to_vec())
         };
@@ -642,7 +642,7 @@ impl App {
     fn update_tooltip(&self) {
         let mut text = format!("{APP_NAME} {}", env!("CARGO_PKG_VERSION"));
         let engine = self.engine();
-        if engine.devices().is_empty() {
+        if engine.all_keys().is_empty() {
             text.push_str("\nNo Razer devices");
         }
         for dev in engine.devices() {
@@ -659,6 +659,9 @@ impl App {
                 None => String::new(),
             };
             text.push_str(&format!("\n{}: {active}{battery}", engine.label(dev)));
+        }
+        for device in engine.profile_devices().into_iter().filter(|device| device.id.starts_with("camera:")) {
+            text.push_str(&format!("\n{}: {}", device.label, device.active));
         }
         if !engine.synapse().is_empty() {
             text.push_str("\nSynapse is running");
@@ -922,17 +925,16 @@ impl App {
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
         let engine = self.engine.clone();
         let engine = engine.lock().unwrap_or_else(|p| p.into_inner());
-        if engine.devices().is_empty() {
+        if engine.all_keys().is_empty() {
             append(menu, MF_STRING | MF_GRAYED, 0, "No Razer devices found");
         }
-        for dev in engine.devices() {
-            append(menu, MF_STRING | MF_GRAYED, 0, &engine.label(dev));
-            let (names, active) = Engine::profiles(dev);
-            for name in names {
+        for dev in engine.profile_devices() {
+            append(menu, MF_STRING | MF_GRAYED, 0, &dev.label);
+            for name in dev.profiles {
                 let id = ID_PROFILE_BASE + self.profile_items.len() as u32;
-                let check = if name == active { MF_CHECKED } else { MF_UNCHECKED };
+                let check = if name == dev.active { MF_CHECKED } else { MF_UNCHECKED };
                 append(menu, MF_STRING | check, id as usize, &format!("    {name}"));
-                self.profile_items.push((dev.key(), name));
+                self.profile_items.push((dev.id.clone(), name));
             }
         }
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
@@ -1073,6 +1075,11 @@ unsafe fn register_hid_notifications(hwnd: HWND) {
     filter.dbcc_size = size_of::<DEV_BROADCAST_DEVICEINTERFACE_W>() as u32;
     filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
     filter.dbcc_classguid = GUID_DEVINTERFACE_HID;
+    RegisterDeviceNotificationW(hwnd, &filter as *const _ as *const c_void, DEVICE_NOTIFY_WINDOW_HANDLE);
+    // UVC cameras do not necessarily expose any HID interface.
+    filter.dbcc_classguid = windows_sys::core::GUID::from_u128(0x65e8773d_8f56_11d0_a3b9_00a0c9223196);
+    RegisterDeviceNotificationW(hwnd, &filter as *const _ as *const c_void, DEVICE_NOTIFY_WINDOW_HANDLE);
+    filter.dbcc_classguid = windows_sys::core::GUID::from_u128(0xe5323777_f976_4f5b_9b55_b94699c46e44);
     RegisterDeviceNotificationW(hwnd, &filter as *const _ as *const c_void, DEVICE_NOTIFY_WINDOW_HANDLE);
 }
 

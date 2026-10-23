@@ -1,6 +1,8 @@
 use secbird_core::{actions, config_dir, discover, hidapi::HidApi, Db, Device, Error, Rgb, Store};
 use std::process::ExitCode;
 
+mod camera;
+
 const USAGE: &str = "\
 Secretarybird - minimal control for Razer peripherals
 
@@ -16,10 +18,18 @@ DEVICE:
                             (apps.razer.com); never installs anything
   report [--json]           Read-only description of connected Razer hardware, to share
                             when a device is missing or misbehaves (serials shortened)
+  camera controls           Read current image/camera controls and supported ranges
   dock-test <red|spectrum|battery|off>
                             Test: set a Mouse Dock Pro's own light once (#39)
 
 SETTINGS (saved to the active profile):
+  camera [<control> <value>] Kiyo Pro (Windows): hdr on|off, hdr-mode dark|bright,
+                            fov wide|medium|narrow, af-mode responsive|passive
+                            Standard controls: numeric driver value, auto, or default;
+                            e.g. camera brightness 128; camera exposure -6;
+                            camera focus auto; camera white-balance auto.
+                            Anti-flicker: off|50hz|60hz|auto. Low-light: on|off.
+                            Use camera controls to check driver support.
   dpi [X[xY]]               Show or set DPI (e.g. 1600 or 1600x800)
   poll [HZ]                 Show or set polling rate (125, 500, 1000, ...)
   stages [DPI ...] [--use N]
@@ -84,7 +94,7 @@ UPDATES:
 
 OPTIONS:
   -V       Show the version (also --version)
-  -d ID    Pick a device by USB product id (0099) or serial, when several are connected
+  -d ID    Pick by USB product id (0099), serial, or full camera identity from list
 
 Set SECBIRD_SIM=all (or a list: mouse,wireless,keyboard,old-keyboard,naga,cobra,dock,blackwidow,
 goliathus,firefly,blade,base-station) to add simulated devices (no hardware needed).
@@ -163,9 +173,22 @@ Download: {}", r.version, secbird_core::update::CURRENT, r.url),
         return Ok(());
     }
 
+    #[cfg(not(windows))]
+    if command == "camera" {
+        return Err(Error::Unsupported("camera controls require Windows 10/11".into()));
+    }
+
     let dir = config_dir();
     let api = HidApi::new()?;
     let db = Db::load(Some(&dir.join("devices.json")))?;
+    let camera_backend = secbird_core::camera::backend();
+    let cameras = match camera_backend.as_ref() {
+        Ok(backend) => match backend.discover() {
+            Ok(cameras) => cameras.into_iter().filter(|c| selects(c.pid, &c.id, "")).collect::<Vec<_>>(),
+            Err(error) => { eprintln!("Camera discovery: {error}"); Vec::new() },
+        },
+        Err(error) => { eprintln!("Camera discovery: {error}"); Vec::new() },
+    };
     let devices: Vec<Device> = discover(&api, &db)
         .into_iter()
         .filter(|d| selects(d.pid, &d.key(), &d.serial))
@@ -192,7 +215,7 @@ Download: {}", r.version, secbird_core::update::CURRENT, r.url),
     }
 
     if command == "list" {
-        if devices.is_empty() {
+        if devices.is_empty() && cameras.is_empty() {
             println!("No Razer devices found.");
         }
         for d in &devices {
@@ -200,7 +223,12 @@ Download: {}", r.version, secbird_core::update::CURRENT, r.url),
             let serial = if d.serial.is_empty() { String::new() } else { format!(", serial {}", d.serial) };
             println!("{:04X}  {}  [interface {}, txid {:02X}{serial}]{known}", d.pid, d.name(), d.interface, d.txid);
         }
+        for camera in &cameras {
+            println!("{:04X}  {}  [UVC, id {}]{}", camera.pid, camera.name, camera.id,
+                camera.control_error.as_ref().map(|e| format!(" (controls unavailable: {e})")).unwrap_or_default());
+        }
         for pid in secbird_core::device::unanswered(&api, &devices).into_iter().filter(|p| selects(*p, "", "")) {
+            if db.get(pid).is_some_and(|spec| spec.kind == secbird_core::Kind::Webcam) { continue; }
             match db.get(pid) {
                 Some(spec) if spec.lighting == secbird_core::Lighting::Kraken => {
                     println!("{pid:04X}  {}  (connected; its headset protocol isn't supported yet)", spec.name)
@@ -219,6 +247,17 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
             }
         }
         return Ok(());
+    }
+
+    if command == "camera" || (selector.is_some() && !cameras.is_empty())
+        || (devices.is_empty() && cameras.len() == 1 && !matches!(command.as_str(), "sync" | "firmware")) {
+        let camera = camera::select(&cameras, selector.as_deref())?;
+        let backend = camera_backend.map_err(|error| Error::System(error.to_string()))?;
+        let mut store = Store::load(&dir.join("profiles.json"))?;
+        return camera::run(backend.as_ref(), camera, &command, &args[1..], &mut store);
+    }
+    if !cameras.is_empty() && !devices.is_empty() && !matches!(command.as_str(), "sync" | "firmware") {
+        return Err(Error::InvalidArg("several devices connected; select one with -d (see secbird list)".into()));
     }
 
     if command == "firmware" {
