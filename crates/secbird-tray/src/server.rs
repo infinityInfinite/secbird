@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 const PAGE: &str = include_str!("editor.html");
+const I18N: &str = include_str!("i18n.js");
 const LOGO_PNG: &[u8] = include_bytes!("../../../assets/logo-64.png");
 const MAX_HEADER: usize = 16 * 1024;
 /// Profile imports with painted keys can be a few hundred KB.
@@ -198,7 +199,10 @@ impl Server {
         if req.method == "GET" && req.path == "/" {
             return if req.query_param("t") == Some(self.token.as_str()) {
                 let logo = format!("data:image/png;base64,{}", base64(LOGO_PNG));
-                let page = PAGE.replace("{{LOGO}}", &logo);
+                let settings = crate::settings::TraySettings::load();
+                let page = PAGE.replace("{{LOGO}}", &logo)
+                    .replace("{{I18N}}", I18N)
+                    .replace("{{EDITOR_LANGUAGE}}", settings.editor_language());
                 Response { status: "200 OK", content_type: "text/html; charset=utf-8", body: page.into_bytes() }
             } else {
                 Response::text("403 Forbidden", "Open the editor from the Secretarybird tray menu.")
@@ -583,6 +587,7 @@ fn settings_json(engine: &Engine) -> Value {
         "battery_warning_at": s.low_battery(),
         "auto_switch": !s.auto_switch_off,
         "away_lights": s.away_lights.as_deref().unwrap_or(""),
+        "editor_language": s.editor_language(),
         "synapse": engine.synapse(),
     })
 }
@@ -611,6 +616,13 @@ fn app_post(engine: &mut Engine, path: &str, b: &Body) -> Option<Result<Value, E
                     s.battery_warning_at = Some(b.value);
                 }
                 "auto_switch" => s.auto_switch_off = !b.on,
+                "editor_language" => {
+                    let want = b.data.as_str().unwrap_or_default();
+                    if !crate::settings::EDITOR_LANGUAGES.contains(&want) {
+                        return Some(Err(Error::InvalidArg(format!("unknown editor language '{want}'"))));
+                    }
+                    s.editor_language = (want != "auto").then(|| want.to_string());
+                }
                 // `data`: "dim", "off", or "" to leave the lights as they are.
                 "away_lights" => {
                     let want = b.data.as_str().unwrap_or_default();

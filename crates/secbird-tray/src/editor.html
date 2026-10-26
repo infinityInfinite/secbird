@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-editor-language="{{EDITOR_LANGUAGE}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -227,7 +227,11 @@
   .chips5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); gap: 6px; }
   .chips5 .pill { border-radius: 8px; padding: 7px 0; text-align: center; }
   .chips5 .pill[aria-pressed=true] { background: var(--fill); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-  #stageRows .dpi { font-size: 17px; width: 84px; }
+  .stage-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .stage-values { display: flex; gap: 8px; min-width: 0; }
+  .stage-values label { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; }
+  #stageRows .dpi { display: block; font-size: 17px; width: 100%; }
+  .stage-use { grid-column: 2; }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; }
   .pill { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; cursor: pointer; color: var(--muted); }
   .pill:hover { color: var(--text); }
@@ -490,16 +494,24 @@
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
+{{I18N}}
+</script>
+<script>
+const languagePreference = document.documentElement.dataset.editorLanguage || 'auto';
+const uiI18n = SecretarybirdI18n.create({ preference: languagePreference, languages: navigator.languages || [navigator.language] });
+const uiText = uiI18n.text;
+uiI18n.applyStatic(document);
+
 const T = new URLSearchParams(location.search).get('t');
 const $ = id => document.getElementById(id);
 const el = (tag, { dataset, ...props } = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); Object.assign(e.dataset, dataset); e.append(...kids.filter(k => k != null && k !== false)); return e; };
 // Colors for LEDs, not screens: an LED shows even small green/blue parts (FF2D55 looks pink),
 // so presets use pure channels. Orange and yellow need far less green than on a monitor.
-const PRESETS = [['FF0000','Red'],['FF2800','Orange'],['FF9600','Yellow'],['00FF00','Green'],['00FFFF','Cyan'],
-                 ['0000FF','Blue'],['5000FF','Purple'],['FF00FF','Magenta'],['FF0028','Pink'],['FFFFFF','White']];
-const NAMES = { scroll: 'Scroll wheel', logo: 'Logo', underglow: 'Underglow', backlight: 'Backlight', side: 'Side plate', profile: 'Profile light', dock: 'Dock' };
-const KINDS = { mouse: 'Mouse', keyboard: 'Keyboard', laptop: 'Laptop', keypad: 'Keypad', mousepad: 'Mousepad',
-  headset: 'Headset', accessory: 'Accessory', unknown: 'Device' };
+const PRESETS = [['FF0000',uiText('Red')],['FF2800',uiText('Orange')],['FF9600',uiText('Yellow')],['00FF00',uiText('Green')],['00FFFF',uiText('Cyan')],
+                 ['0000FF',uiText('Blue')],['5000FF',uiText('Purple')],['FF00FF',uiText('Magenta')],['FF0028',uiText('Pink')],['FFFFFF',uiText('White')]];
+const NAMES = { scroll: uiText('Scroll wheel'), logo: uiText('Logo'), underglow: uiText('Underglow'), backlight: uiText('Backlight'), side: uiText('Side plate'), profile: uiText('Profile light'), dock: uiText('Dock') };
+const KINDS = { mouse: uiText('Mouse'), keyboard: uiText('Keyboard'), laptop: uiText('Laptop'), keypad: uiText('Keypad'), mousepad: uiText('Mousepad'),
+  headset: uiText('Headset'), accessory: uiText('Accessory'), unknown: uiText('Device') };
 let devices = [], unsupported = [], synapse = [], dev = null, showAll = null;
 let sel = null, section = null, view = 'work'; // selected tile, rail section, 'work' or 'compare'
 let btnFailed = {}, btnData = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
@@ -539,7 +551,7 @@ const LAYOUT_FIXES = {
   '02A6': keys => {
     const num = keys.find(k => k.label === 'Num'), star = keys.find(k => k.label === '*');
     return [...keys.map(k => k.row === 5 && k.label === '.' ? { ...k, col: 19 } : k),
-      { label: 'Media', row: 0, col: 18, x: num.x, y: 0, w: 2, h: 1 },
+      { label: uiText('Media'), row: 0, col: 18, x: num.x, y: 0, w: 2, h: 1 },
       { label: 'Dial', row: 5, col: 20, x: star.x + 1, y: 0, w: 1, h: 1 }];
   },
 };
@@ -582,7 +594,7 @@ function nameKeys(keys) {
 }
 // The maps above are ANSI. ISO boards (#45) have a key left of Z (matrix column 2) and one left
 // of Enter (column 13), and a tall Enter where ANSI has its backslash.
-const KB_LAYOUTS = [['ansi', 'US (ANSI)'], ['iso', 'UK (ISO)'], ['de', 'German (QWERTZ)']];
+const KB_LAYOUTS = [['ansi', uiText('US (ANSI)')], ['iso', uiText('UK (ISO)')], ['de', uiText('German (QWERTZ)')]];
 const DE_LABELS = { '`': '^', '-': 'ß', '=': '´', Y: 'Z', Z: 'Y', '[': 'Ü', ']': '+', ';': 'Ö', "'": 'Ä', '/': '-' };
 function kbLayout() { return (dev && remembered('kblayout-' + dev.id)) || 'ansi'; }
 function isoLayout(keys, labels) {
@@ -613,7 +625,7 @@ async function api(path, body) {
     body: body ? JSON.stringify({ id: dev && dev.id, ...body }) : undefined,
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || 'Request failed');
+  if (!r.ok) throw new Error(uiText(j.error || 'Request failed'));
   return j;
 }
 
@@ -622,7 +634,7 @@ let toastTimer;
 function toast(msg, err, undo) {
   const t = $('toast');
   t.textContent = msg; t.className = 'show' + (err ? ' err' : '') + (undo ? ' act' : '');
-  if (undo) t.append(el('button', { textContent: 'Undo', onclick: () => { t.className = ''; undo(); } }));
+  if (undo) t.append(el('button', { textContent: uiText('Undo'), onclick: () => { t.className = ''; undo(); } }));
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', undo ? 10000 : err ? 4500 : 1600);
 }
 
@@ -637,7 +649,7 @@ function live(send, done) {
     (async () => {
       while (next !== undefined) {
         const v = next; next = undefined;
-        try { const r = await send(v), msg = done ? done(r) : 'Saved to ' + dev.active; if (msg) toast(msg); } catch (e) { toast(e.message, true); }
+        try { const r = await send(v), msg = done ? done(r) : uiText('Saved to ') + dev.active; if (msg) toast(msg); } catch (e) { toast(e.message, true); }
       }
       busy = false;
     })();
@@ -656,7 +668,7 @@ function scrollRow(row) {
       onclick: () => nav.scrollBy({ left: (cls === 'l' ? -1 : 1) * Math.max(120, nav.clientWidth * 0.7) }) });
     return b;
   };
-  const l = mk('l', 'left', 'Scroll left'), r = mk('r', 'right', 'Scroll right');
+  const l = mk('l', 'left', uiText('Scroll left')), r = mk('r', 'right', uiText('Scroll right'));
   row.prepend(l); row.append(r);
   const update = () => {
     const more = nav.scrollWidth - nav.clientWidth > 1;
@@ -684,7 +696,7 @@ function bringIntoView(nav, item) {
 const icon = name => `<svg class="ico" viewBox="0 0 16 16" aria-hidden="true">${ICONS[name]}</svg>`;
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const label = name => NAMES[name] || name.charAt(0).toUpperCase() + name.slice(1);
-const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+const plural = (n, word) => uiI18n.plural(n, word);
 const hz = v => v + ' Hz';
 // Line drawings for the home cards, picked by kind and shape rather than model, so a new
 // devices.json entry gets one without a drawing of its own. `.f` parts are filled.
@@ -773,7 +785,7 @@ function render() {
   $('tabs').innerHTML = '';
   const tab = (text, selected, onclick) => $('tabs').append(el('button', { className: 'tab', textContent: text, onclick, ariaSelected: selected }));
   if (devices.length || unsupported.length) {
-    tab('All devices', !!showAll && !showSettings, () => { showAll = true; showSettings = false; sel = null; render(); });
+    tab(uiText('All devices'), !!showAll && !showSettings, () => { showAll = true; showSettings = false; sel = null; render(); });
     devices.forEach(d => tab(devLabel(d), !showAll && !showSettings && d.id === dev.id, () => openDevice(d)));
   }
   requestAnimationFrame(() => { bringIntoView($('tabs'), $('tabs').querySelector('[aria-selected=true]')); updateTabsRow(); });
@@ -796,8 +808,8 @@ function remember(key, value) { try { localStorage.setItem('secbird-' + key, val
 
 function renderDevbar() {
   $('name').textContent = devLabel(dev);
-  $('meta').textContent = [KINDS[dev.kind] || 'Device', dev.battery != null && dev.battery + '% battery',
-    !dev.known && 'not in the device database'].filter(Boolean).join(' · ');
+  $('meta').textContent = [KINDS[dev.kind] || uiText('Device'), dev.battery != null && dev.battery + uiText('% battery'),
+    !dev.known && uiText('not in the device database')].filter(Boolean).join(' · ');
   paintPreview();
   renderProfiles();
   $('compareBtn').ariaPressed = view === 'compare';
@@ -810,20 +822,20 @@ function renderProfiles(adding) {
   box.innerHTML = '';
   dev.profiles.forEach(n => {
     const apps = (prof(n).apps || []).length;
-    const b = el('button', { className: 'pbtn', ariaCurrent: n === dev.active, title: n === dev.active ? n + ' is live' : 'Make ' + n + ' live',
-      onclick: () => { if (n !== dev.active) activate(n); } }, n, apps ? el('span', { className: 'g num', textContent: apps === 1 ? '1 game' : apps + ' games' }) : null);
+    const b = el('button', { className: 'pbtn', ariaCurrent: n === dev.active, title: n === dev.active ? n + uiText(' is live') : uiText('Make ') + n + uiText(' live'),
+      onclick: () => { if (n !== dev.active) activate(n); } }, n, apps ? el('span', { className: 'g num', textContent: apps === 1 ? uiText('1 game') : apps + uiText(' games') }) : null);
     b.dataset.p = n;
     box.append(b);
   });
   if (adding) {
-    const input = el('input', { type: 'text', placeholder: 'Name, e.g. Valorant', maxLength: 32, ariaLabel: 'New profile name' });
+    const input = el('input', { type: 'text', placeholder: uiText('Name, e.g. Valorant'), maxLength: 32, ariaLabel: uiText('New profile name') });
     const form = el('form', { className: 'newform', onsubmit: e => { e.preventDefault(); if (input.value.trim()) createProfile(input.value.trim()); } },
-      input, el('button', { className: 'ghost', textContent: 'Create', type: 'submit' }),
-      el('button', { className: 'ghost', textContent: 'Cancel', type: 'button', onclick: () => renderProfiles() }));
+      input, el('button', { className: 'ghost', textContent: uiText('Create'), type: 'submit' }),
+      el('button', { className: 'ghost', textContent: uiText('Cancel'), type: 'button', onclick: () => renderProfiles() }));
     input.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); renderProfiles(); } };
     box.append(form); input.focus();
   } else {
-    box.append(el('button', { className: 'padd', innerHTML: icon('plus') + 'New', title: 'New profile, a copy of ' + dev.active, onclick: () => renderProfiles(true) }));
+    box.append(el('button', { className: 'padd', innerHTML: icon('plus') + uiText('New'), title: uiText('New profile, a copy of ') + dev.active, onclick: () => renderProfiles(true) }));
   }
   box.append(el('span', { className: 'uline', id: 'uline' }));
   requestAnimationFrame(placeUnderline);
@@ -854,29 +866,29 @@ function paintPreview() {
 function sections() {
   const s = [];
   const light = dev.leds.map(l => ({ key: 'zone:' + l.name, label: label(l.name) }));
-  if (dev.matrix) light.push({ key: 'keys', label: 'Per-key colors' });
-  if (light.length) s.push({ id: 'light', name: 'Lighting',
-    rows: [{ key: 'lighting-control', label: 'Control lighting' }, ...(dev.lighting_control ? light : [])],
+  if (dev.matrix) light.push({ key: 'keys', label: uiText('Per-key colors') });
+  if (light.length) s.push({ id: 'light', name: uiText('Lighting'),
+    rows: [{ key: 'lighting-control', label: uiText('Control lighting') }, ...(dev.lighting_control ? light : [])],
     tools: dev.lighting_control && dev.leds.length > 1 ? 'allzones' : null });
   const sens = [];
   if (dev.dpi) sens.push({ key: 'dpi', label: 'DPI' });
-  if (dev.stages) sens.push({ key: 'stages', label: 'DPI stages' });
-  if (dev.polling) sens.push({ key: 'polling', label: 'Polling rate' });
-  if (sens.length) s.push({ id: 'sens', name: 'Sensitivity', rows: sens });
+  if (dev.stages) sens.push({ key: 'stages', label: uiText('DPI stages') });
+  if (dev.polling) sens.push({ key: 'polling', label: uiText('Polling rate') });
+  if (sens.length) s.push({ id: 'sens', name: uiText('Sensitivity'), rows: sens });
   if (dev.kind === 'mouse' || isBoard()) {
     const list = btnData[dev.id];
-    s.push({ id: 'buttons', name: isBoard() ? 'Keys' : 'Buttons', tools: 'layer', loading: !list,
-      rows: [...(list || []).filter(b => b[btnLayer] != null).map(b => ({ key: 'btn:' + b.name, label: b.label, name: b.name })),
-        ...(list && list.length && !isBoard() ? [{ key: 'onboard', label: 'Saved on the mouse' }] : [])] });
+    s.push({ id: 'buttons', name: isBoard() ? uiText('Keys') : uiText('Buttons'), tools: 'layer', loading: !list,
+      rows: [...(list || []).filter(b => b[btnLayer] != null).map(b => ({ key: 'btn:' + b.name, label: uiText(b.label), name: b.name })),
+        ...(list && list.length && !isBoard() ? [{ key: 'onboard', label: uiText('Saved on the mouse') }] : [])] });
   }
-  if (dev.macros) s.push({ id: 'macros', name: 'Macros', rows: [{ key: 'macros', label: 'Macros on the device' }] });
-  if (dev.game_mode != null) s.push({ id: 'gaming', name: 'Gaming', rows: [{ key: 'gaming', label: 'Gaming mode' }] });
+  if (dev.macros) s.push({ id: 'macros', name: uiText('Macros'), rows: [{ key: 'macros', label: uiText('Macros on the device') }] });
+  if (dev.game_mode != null) s.push({ id: 'gaming', name: uiText('Gaming'), rows: [{ key: 'gaming', label: uiText('Gaming mode') }] });
   const power = [];
-  if (dev.sleep) power.push({ key: 'sleep', label: 'Sleep when idle' });
-  if (dev.dimming) power.push({ key: 'dimming', label: 'Keyboard when idle' });
-  if (power.length) s.push({ id: 'power', name: 'Power', rows: power });
-  s.push({ id: 'profile', name: 'Profile', rows: [{ key: 'apps', label: 'Switches with' }] });
-  s.push({ id: 'device', name: 'Device', rows: [{ key: 'device', label: 'About this device' }] });
+  if (dev.sleep) power.push({ key: 'sleep', label: uiText('Sleep when idle') });
+  if (dev.dimming) power.push({ key: 'dimming', label: uiText('Keyboard when idle') });
+  if (power.length) s.push({ id: 'power', name: uiText('Power'), rows: power });
+  s.push({ id: 'profile', name: uiText('Profile'), rows: [{ key: 'apps', label: uiText('Switches with') }] });
+  s.push({ id: 'device', name: uiText('Device'), rows: [{ key: 'device', label: uiText('About this device') }] });
   return s;
 }
 const sectionOf = key => (sections().find(s => s.rows.some(r => r.key === key))
@@ -886,30 +898,30 @@ const sectionOf = key => (sections().find(s => s.rows.some(r => r.key === key))
 function railSummary(s) {
   const p = dev.profile;
   if (s.id === 'light') {
-    if (!dev.lighting_control) return 'Not controlled';
-    if (p.keys && p.keys.length && dev.matrix) return 'Per-key colors';
+    if (!dev.lighting_control) return uiText('Not controlled');
+    if (p.keys && p.keys.length && dev.matrix) return uiText('Per-key colors');
     const box = el('span');
     dev.leds.forEach(l => { const paint = zonePaint(zoneOf(p, l.name)); const d = el('i', { className: 'dot' + (paint ? '' : ' off') });
       if (paint) d.style.background = paint; box.append(d); });
     const fx = dev.leds.map(l => zoneOf(p, l.name).effect).find(Boolean);
     const lit = dev.leds.map(l => zoneOf(p, l.name)).filter(z => z.color && !z.off);
-    box.append(fx ? effectLabel(fx) : lit.length === 1 ? '#' + lit[0].color : lit.length ? plural(lit.length, 'zone') + ' lit' : 'Off');
+    box.append(fx ? effectLabel(fx) : lit.length === 1 ? '#' + lit[0].color : lit.length ? plural(lit.length, 'zone') + uiText(' lit') : uiText('Off'));
     return box;
   }
-  if (s.id === 'sens') return [dev.dpi && dev.dpi.x + ' DPI', dev.polling && hz(dev.polling.hz)].filter(Boolean).join(' · ');
+  if (s.id === 'sens') return [dev.dpi && dpiLabel(dev.dpi) + ' DPI', dev.polling && hz(dev.polling.hz)].filter(Boolean).join(' · ');
   if (s.id === 'buttons') {
     const n = Object.keys(p.buttons || {}).length;
-    return n ? plural(n, isBoard() ? 'key' : 'button') + ' changed' : 'As saved in the ' + holder();
+    return n ? plural(n, isBoard() ? 'key' : 'button') + uiText(' changed') : uiText`As saved in the ${holder()}`;
   }
   if (s.id === 'gaming') return gamingText(dev.game_mode);
-  if (s.id === 'macros') { const m = macroData[dev.id]; return m ? (m.macros.length ? plural(m.macros.length, 'macro') : 'None yet') : 'On the device'; }
+  if (s.id === 'macros') { const m = macroData[dev.id]; return m ? (m.macros.length ? plural(m.macros.length, 'macro') : uiText('None yet')) : uiText('On the device'); }
   if (s.id === 'power') {
     const sl = dev.sleep;
-    if (!sl) return 'When idle: ' + DIMMING[dev.dimming].toLowerCase();
-    return sl.auto === false ? 'Never sleeps' : 'Sleeps after ' + sl.minutes + ' min';
+    if (!sl) return uiText('When idle: ') + DIMMING[dev.dimming].toLowerCase();
+    return sl.auto === false ? uiText('Never sleeps') : uiText('Sleeps after ') + sl.minutes + uiText(' min');
   }
-  if (s.id === 'profile') { const a = p.apps || []; return a.length ? a.join(', ') : 'No games yet'; }
-  if (s.id === 'device') return dev.firmware ? 'Firmware ' + dev.firmware : (KINDS[dev.kind] || 'Device');
+  if (s.id === 'profile') { const a = p.apps || []; return a.length ? a.join(', ') : uiText('No games yet'); }
+  if (s.id === 'device') return dev.firmware ? uiText('Firmware ') + dev.firmware : (KINDS[dev.kind] || uiText('Device'));
   return '';
 }
 
@@ -963,21 +975,21 @@ function renderTiles(cur) {
   const head = el('div', { className: 'sechead' }, el('h2', { textContent: cur.name }));
   const tools = el('div', { className: 'tools' });
   if (cur.tools === 'layer') {
-    if (Object.keys(dev.profile.buttons || {}).length) tools.append(el('button', { className: 'ghost', textContent: 'Restore all',
-      title: `Every changed ${isBoard() ? 'key' : 'button'} back to what the ${holder()} stores`, onclick: restoreAllButtons }));
+    if (Object.keys(dev.profile.buttons || {}).length) tools.append(el('button', { className: 'ghost', textContent: uiText('Restore all'),
+      title: uiText`Every changed ${isBoard() ? uiText('key') : uiText('button')} back to what the ${holder()} stores`, onclick: restoreAllButtons }));
     if (isBoard() && remapLayout()) {
-      const pick = el('select', { ariaLabel: 'Keyboard layout', onchange: () => { remember('kblayout-' + dev.id, pick.value); renderWork(true); } });
+      const pick = el('select', { ariaLabel: uiText('Keyboard layout'), onchange: () => { remember('kblayout-' + dev.id, pick.value); renderWork(true); } });
       KB_LAYOUTS.forEach(([v, txt]) => pick.append(new Option(txt, v, false, v === kbLayout())));
       tools.append(pick);
     }
-    const seg = el('span', { className: 'seg', role: 'group', ariaLabel: 'Button layer' });
-    [['normal', 'Normal'], ['hypershift', 'HyperShift']].forEach(([v, txt]) => seg.append(el('button', {
-      textContent: txt, ariaPressed: btnLayer === v, title: v === 'hypershift' ? 'What each button does while a button set to HyperShift is held' : 'What each button does',
+    const seg = el('span', { className: 'seg', role: 'group', ariaLabel: uiText('Button layer') });
+    [['normal', uiText('Normal')], ['hypershift', 'HyperShift']].forEach(([v, txt]) => seg.append(el('button', {
+      textContent: txt, ariaPressed: btnLayer === v, title: v === 'hypershift' ? uiText('What each button does while a button set to HyperShift is held') : uiText('What each button does'),
       onclick: () => { btnLayer = v; sel = null; renderWork(); } })));
     tools.append(seg);
   } else if (cur.tools === 'allzones') {
-    tools.append(el('button', { className: 'link', textContent: 'Same on all zones', title: 'The colour or effect of the zone you changed last, on every zone',
-      onclick: () => { const src = sourceZone(); if (src) copyToZones(src); else toast('Pick a color or effect for one zone first', true); } }));
+    tools.append(el('button', { className: 'link', textContent: uiText('Same on all zones'), title: uiText('The colour or effect of the zone you changed last, on every zone'),
+      onclick: () => { const src = sourceZone(); if (src) copyToZones(src); else toast(uiText('Pick a color or effect for one zone first'), true); } }));
   }
   head.append(tools);
   t.append(head);
@@ -985,7 +997,7 @@ function renderTiles(cur) {
     const g = el('div', { className: 'tgrid' });
     for (let i = 0; i < 8; i++) g.append(el('div', { className: 'skel' }));
     t.append(g, el('p', { className: 'hint', textContent: isBoard()
-      ? 'Reading every key from the ' + holder() + '. This takes a few seconds…' : 'Reading the buttons from the mouse…' }));
+      ? uiText`Reading every key from the ${holder()}. This takes a few seconds…` : uiText('Reading the buttons from the mouse…') }));
     return;
   }
   if (cur.id === 'buttons' && isBoard()) return keyTiles(t, cur);
@@ -997,13 +1009,13 @@ function renderTiles(cur) {
   plain.forEach(r => g.append(tile(r)));
   t.append(g);
   if (grid.length) {
-    t.append(el('p', { className: 'subhead', textContent: 'Side grid' }));
+    t.append(el('p', { className: 'subhead', textContent: uiText('Side grid') }));
     const k = el('div', { className: 'keypad' });
     grid.forEach(r => k.append(tile(r, r.key.slice(9))));
     t.append(k);
   }
   if (hex.length) {
-    t.append(el('p', { className: 'subhead', textContent: '6-button side plate' }));
+    t.append(el('p', { className: 'subhead', textContent: uiText('6-button side plate') }));
     const k = el('div', { className: 'keypad' });
     hex.forEach(r => k.append(tile(r, r.key.slice(8))));
     t.append(k);
@@ -1012,7 +1024,7 @@ function renderTiles(cur) {
 
 const BOARDS = ['keyboard', 'keypad', 'laptop'];
 const isBoard = () => BOARDS.includes(dev.kind);
-const holder = () => dev.kind === 'mouse' ? 'mouse' : (KINDS[dev.kind] || 'device').toLowerCase();
+const holder = () => dev.kind === 'mouse' ? uiText('mouse') : (KINDS[dev.kind] || uiText('device')).toLowerCase();
 
 // The keyboard drawn for remapping. Key ids are key positions, not lights, so a board whose
 // lights aren't mapped still gets a standard drawing: full size if it has a numpad, else
@@ -1028,9 +1040,9 @@ function remapLayout() {
 // keypads) are tiles below it.
 function keyTiles(t, cur) {
   if (!cur.rows.length) {
-    t.append(el('p', { className: 'hint', textContent: btnFailed[dev.id] ? 'Couldn’t read the keys. Unplug and replug it, then open this again.'
-      : btnLayer === 'hypershift' ? 'This ' + holder() + ' has no HyperShift layer to change.'
-      : 'This ' + holder() + ' doesn’t answer key remapping commands. Please send a device report (Device section) in a GitHub issue.' }));
+    t.append(el('p', { className: 'hint', textContent: btnFailed[dev.id] ? uiText('Couldn’t read the keys. Unplug and replug it, then open this again.')
+      : btnLayer === 'hypershift' ? uiText`This ${holder()} has no HyperShift layer to change.`
+      : uiText`This ${holder()} doesn’t answer key remapping commands. Please send a device report (Device section) in a GitHub issue.` }));
     return;
   }
   const rows = new Map(cur.rows.map(r => [r.key, r])), drawn = new Set(), keys = remapLayout();
@@ -1038,7 +1050,7 @@ function keyTiles(t, cur) {
     const w = Math.max(...keys.map(k => k.x + k.w)), h = Math.max(...keys.map(k => k.y + k.h));
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.id = 'remapkb'; svg.setAttribute('viewBox', `-0.05 -0.05 ${w + 0.1} ${h + 0.1}`);
-    svg.setAttribute('aria-label', 'Keyboard: pick a key to change what it does');
+    svg.setAttribute('aria-label', uiText('Keyboard: pick a key to change what it does'));
     svg.innerHTML = keys.map(k => {
       const r = k.name && rows.get('btn:key-' + k.name);
       const box = `<rect x="${k.x + .05}" y="${k.y + .05}" width="${k.w - .1}" height="${k.h - .1}" rx=".12"/>`;
@@ -1048,7 +1060,7 @@ function keyTiles(t, cur) {
       const what = el('span', { innerHTML: html }).textContent.replace(/^Key /, '');
       const short = what.length > 8 ? what.slice(0, 7) + '…' : what;
       return `<g data-row="${esc(r.key)}" class="${changed ? 'changed' : ''}" tabindex="0" role="button" aria-pressed="${sel === r.key}"` +
-        ` aria-label="${esc(r.label + ': ' + what + (changed ? ' (changed)' : ''))}"><title>${esc(r.label + ': ' + what)}</title>${box}` +
+        ` aria-label="${esc(r.label + ': ' + what + (changed ? uiText(' (changed)') : ''))}"><title>${esc(r.label + ': ' + what)}</title>${box}` +
         (changed ? `<text x="${k.x + k.w / 2}" y="${k.y + k.h * .34}">${esc(k.label)}</text><text class="act" x="${k.x + k.w / 2}" y="${k.y + k.h * .7}">${esc(short)}</text>`
           : `<text x="${k.x + k.w / 2}" y="${k.y + k.h / 2}">${esc(k.label)}</text>`) + '</g>';
     }).join('');
@@ -1057,7 +1069,7 @@ function keyTiles(t, cur) {
     svg.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(e); } };
     t.append(el('div', { className: 'kbwrap' }, svg));
     if (!(dev.matrix && knownLayout(dev.matrix, dev.kind))) t.append(el('p', { className: 'hint', textContent:
-      'Drawn as a standard keyboard: yours may not have every key shown. Greyed keys can’t be changed.' }));
+      uiText('Drawn as a standard keyboard: yours may not have every key shown. Greyed keys can’t be changed.') }));
   }
   const rest = cur.rows.filter(r => !drawn.has(r.key));
   if (!rest.length) return;
@@ -1066,13 +1078,13 @@ function keyTiles(t, cur) {
   if (!keys) return t.append(g);
   // ISO and Japanese keys most boards don't have: folded away unless one is in use.
   const open = rest.some(r => r.key === sel || cellView(r.key, dev.active)[1]);
-  t.append(el('details', { className: 'morekeys', open }, el('summary', { className: 'subhead', textContent: `${plural(rest.length, 'more key')} (ISO, Japanese)` }), g));
+  t.append(el('details', { className: 'morekeys', open }, el('summary', { className: 'subhead', textContent: uiText`${plural(rest.length, 'more key')} (ISO, Japanese)` }), g));
 }
 
 function tile(r, short) {
   const [html, changed] = cellView(r.key, dev.active);
   const b = el('button', { className: 'tile' + (changed ? ' changed' : ''), ariaPressed: sel === r.key,
-    ariaLabel: r.label + (changed ? ' (changed)' : ''), onclick: () => select(r.key) },
+    ariaLabel: r.label + (changed ? uiText(' (changed)') : ''), onclick: () => select(r.key) },
     el('span', { className: 'tl', textContent: short || r.label }), el('span', { className: 'tv', innerHTML: html }));
   b.dataset.row = r.key;
   if (short) b.title = r.label;
@@ -1098,14 +1110,14 @@ function renderPanel(cur) {
   p.innerHTML = '';
   const r = sel && cur.rows.find(x => x.key === sel);
   if (!r) {
-    p.append(el('div', { className: 'phead' }, el('h2', { textContent: 'Live now: ' + dev.active })),
+    p.append(el('div', { className: 'phead' }, el('h2', { textContent: uiText('Live now: ') + dev.active })),
       el('div', { className: 'pbody' }, liveSummary()));
     return;
   }
   const title = r.label + (r.key.startsWith('btn:') && btnLayer === 'hypershift' ? ' · HyperShift' : '');
   p.append(el('div', { className: 'phead' },
     el('h2', { textContent: title }),
-    el('button', { className: 'xbtn', innerHTML: icon('x'), title: 'Close (Esc)', ariaLabel: 'Close', onclick: closePanel })));
+    el('button', { className: 'xbtn', innerHTML: icon('x'), title: uiText('Close (Esc)'), ariaLabel: uiText('Close'), onclick: closePanel })));
   const body = el('div', { className: 'pbody' });
   p.append(body);
   buildEditor(body, r);
@@ -1122,11 +1134,11 @@ function liveSummary() {
   const p = dev.profile, apps = p.apps || [];
   const box = el('div', { className: 'edbox' });
   box.append(el('div', { className: 'edgroup' },
-    el('p', { className: 'hint', innerHTML: `<b>${esc(dev.active)}</b> is live on this ${esc((KINDS[dev.kind] || 'device').toLowerCase())}.` +
-      (apps.length ? ` It also comes up while ${esc(apps.join(', '))} ${apps.length === 1 ? 'is' : 'are'} in front.` : '') }),
-    el('p', { className: 'hint', textContent: 'Pick a setting to change it. Changes apply right away and are saved to ' + dev.active + '; there is nothing to save or close.' })));
-  if (dev.kind === 'mouse') box.append(el('p', { className: 'note', textContent: 'Button changes go to the mouse’s live memory; Restore puts back what Synapse or the factory stored in it.' }));
-  if (dev.profiles.length > 1) box.append(el('p', { className: 'note', textContent: 'Compare shows every profile side by side.' }));
+    el('p', { className: 'hint', textContent: uiText`${dev.active} is live on this ${(KINDS[dev.kind] || uiText('Device')).toLowerCase()}.` +
+      (apps.length ? uiText` It also comes up while ${apps.join(', ')} ${apps.length === 1 ? 'is' : 'are'} in front.` : '') }),
+    el('p', { className: 'hint', textContent: uiText('Pick a setting to change it. Changes apply right away and are saved to ') + dev.active + uiText('; there is nothing to save or close.') })));
+  if (dev.kind === 'mouse') box.append(el('p', { className: 'note', textContent: uiText('Button changes go to the mouse’s live memory; Restore puts back what Synapse or the factory stored in it.') }));
+  if (dev.profiles.length > 1) box.append(el('p', { className: 'note', textContent: uiText('Compare shows every profile side by side.') }));
   return box;
 }
 
@@ -1179,19 +1191,19 @@ function renderCompare() {
   if (dev.macros && macroData[dev.id] === undefined) loadMacros(dev);
   t.innerHTML = '';
   const head = el('tr');
-  head.append(el('th', { scope: 'col' }, el('span', { className: 'hint', textContent: 'Setting' })));
+  head.append(el('th', { scope: 'col' }, el('span', { className: 'hint', textContent: uiText('Setting') })));
   names.forEach(n => head.append(profileHeader(n)));
   t.append(el('thead', {}, head));
   const span = names.length + 1;
   secs.forEach(s => {
     const body = el('tbody');
     body.append(el('tr', { className: 'grp' }, el('th', { colSpan: span, scope: 'rowgroup', textContent: s.name + (s.id === 'buttons' && btnLayer === 'hypershift' ? ' · HyperShift' : '') })));
-    let rowsOf = s.loading ? [{ key: 'loading', label: 'Reading buttons…' }] : s.rows.filter(r => r.key !== 'lighting-control');
+    let rowsOf = s.loading ? [{ key: 'loading', label: uiText('Reading buttons…') }] : s.rows.filter(r => r.key !== 'lighting-control');
     // A keyboard has a hundred keys: only those some profile changes.
     if (s.id === 'buttons' && isBoard() && !s.loading) {
       const skey = r => btnLayer === 'normal' ? r.name : r.name + '/hypershift';
       rowsOf = rowsOf.filter(r => names.some(n => (prof(n).buttons || {})[skey(r)]));
-      if (!rowsOf.length) rowsOf = [{ key: 'loading', label: 'No profile changes a key' }];
+      if (!rowsOf.length) rowsOf = [{ key: 'loading', label: uiText('No profile changes a key') }];
     }
     rowsOf.forEach(r => {
       const tr = el('tr');
@@ -1200,7 +1212,7 @@ function renderCompare() {
         const [html, remapped] = cellView(r.key, n);
         const changed = n === dev.active ? remapped : differs(r.key, n);
         const b = el('button', { className: 'cell' + (changed ? ' changed' : ''), innerHTML: html, disabled: r.key === 'loading',
-          ariaLabel: `${r.label} in ${n}` + (n === dev.active ? '' : ' (makes it live)'), onclick: () => toggleEditor(r.key, n) });
+          ariaLabel: uiText`${r.label} in ${n}` + (n === dev.active ? '' : uiText(' (makes it live)')), onclick: () => toggleEditor(r.key, n) });
         tr.append(el('td', { className: n === dev.active ? 'c-on' : 'c-other' }, b));
       });
       body.append(tr);
@@ -1236,63 +1248,63 @@ const differs = (key, name) => name !== dev.active && cellValue(key, name) !== c
 // mouse saved. Other columns get their mark from differs().
 function cellView(key, name) {
   const p = prof(name), active = name === dev.active;
-  if (key === 'lighting-control') return [dev.lighting_control ? 'Secretarybird' : '<span class="unset">Not controlled</span>'];
+  if (key === 'lighting-control') return [dev.lighting_control ? 'Secretarybird' : `<span class="unset">${esc(uiText('Not controlled'))}</span>`];
   if (key === 'onboard') {
     const o = onboardData[dev.id];
-    if (!o) return ['<span class="unset">Not saved</span>'];
-    if (o.profile !== name) return ['<span class="unset">Not this profile</span>'];
-    return [`Slot <span class="num">${o.slot}</span>` + (o.changed ? ' · <span class="unset">changed since</span>' : '')];
+    if (!o) return [`<span class="unset">${esc(uiText('Not saved'))}</span>`];
+    if (o.profile !== name) return [`<span class="unset">${esc(uiText('Not this profile'))}</span>`];
+    return [esc(uiText('Slot')) + ` <span class="num">${o.slot}</span>` + (o.changed ? ` · <span class="unset">${esc(uiText('changed since'))}</span>` : '')];
   }
   if (key.startsWith('zone:')) {
     const z = zoneOf(p, key.slice(5));
-    if (p.keys && p.keys.length && dev.matrix) return ['<span class="unset">Per-key colors</span>'];
-    if (z.off) return ['<span class="sw off"></span>Off'];
+    if (p.keys && p.keys.length && dev.matrix) return [`<span class="unset">${esc(uiText('Per-key colors'))}</span>`];
+    if (z.off) return ['<span class="sw off"></span>' + esc(uiText('Off'))];
     if (z.effect) return [esc(effectLabel(z.effect))];
-    if (!z.color) return ['<span class="unset">Not set</span>'];
+    if (!z.color) return [`<span class="unset">${esc(uiText('Not set'))}</span>`];
     return [`<span class="sw" style="background:#${esc(z.color)}"></span><span class="num">#${esc(z.color)}</span>` +
       (z.brightness != null && z.brightness !== 100 ? ` <small class="num">${z.brightness}%</small>` : '')];
   }
   if (key === 'keys') {
-    if (!p.keys || !p.keys.length) return ['<span class="unset">Whole keyboard</span>'];
+    if (!p.keys || !p.keys.length) return [`<span class="unset">${esc(uiText('Whole keyboard'))}</span>`];
     const colors = [...new Set(p.keys.filter(k => k !== '000000'))];
     return [colors.slice(0, 5).map(c => `<span class="sw" style="background:#${esc(c)}"></span>`).join('') + ` <small>${plural(colors.length, 'color')}</small>`];
   }
   if (key === 'dpi') {
     const d = active && dev.dpi ? [dev.dpi.x, dev.dpi.y] : p.dpi;
-    if (!d) return ['<span class="unset">Not set</span>'];
+    if (!d) return [`<span class="unset">${esc(uiText('Not set'))}</span>`];
     return [`<span class="big num">${d[0] === d[1] ? d[0] : d[0] + ' × ' + d[1]}</span> <small>DPI</small>`];
   }
   if (key === 'polling') {
     const v = active && dev.polling ? dev.polling.hz : p.polling;
-    return v ? [`<span class="num">${hz(v)}</span>`] : ['<span class="unset">Not set</span>'];
+    return v ? [`<span class="num">${hz(v)}</span>`] : [`<span class="unset">${esc(uiText('Not set'))}</span>`];
   }
   if (key === 'stages') {
     const st = stagesOf(name);
-    if (!st) return ['<span class="unset">Not set</span>'];
+    if (!st) return [`<span class="unset">${esc(uiText('Not set'))}</span>`];
     return [st.list.map((d, i) => { const v = d[0] === d[1] ? d[0] : d[0] + '×' + d[1];
       return i + 1 === st.active ? `<b class="num">${v}</b>` : `<span class="num">${v}</span>`; }).join(' · ')];
   }
   if (key === 'dimming') {
     const d = dimmingOf(name);
-    return [d ? DIMMING[d] : '<span class="unset">Not set</span>'];
+    return [d ? DIMMING[d] : `<span class="unset">${esc(uiText('Not set'))}</span>`];
   }
   if (key === 'gaming') {
     const g = gamingOf(name);
-    return [g ? gamingText(g) : '<span class="unset">Not set</span>'];
+    return [g ? gamingText(g) : `<span class="unset">${esc(uiText('Not set'))}</span>`];
   }
   if (key === 'sleep') {
     const sl = sleepOf(name);
-    if (!sl) return ['<span class="unset">Not set</span>'];
-    return [sl.auto === false ? 'Never' : `After <span class="num">${sl.minutes}</span> min`];
+    if (!sl) return [`<span class="unset">${esc(uiText('Not set'))}</span>`];
+    return [sl.auto === false ? uiText('Never') : esc(uiText`After ${sl.minutes} min`)];
   }
   if (key === 'macros') {
     const m = macroData[dev.id];
     if (!m) return ['<span class="unset">…</span>'];
-    return [m.macros.length ? `${plural(m.macros.length, 'macro')} <small>· every profile</small>` : '<span class="unset">None yet</span>'];
+    return [m.macros.length ? `${plural(m.macros.length, 'macro')} <small>· ${esc(uiText('every profile'))}</small>` : `<span class="unset">${esc(uiText('None yet'))}</span>`];
   }
   if (key === 'loading') return ['<span class="unset">…</span>'];
-  if (key === 'apps') { const a = p.apps || []; return [a.length ? esc(a.join(', ')) : '<span class="unset">No games yet</span>']; }
-  if (key === 'device') return [esc(dev.firmware ? 'Firmware ' + dev.firmware : KINDS[dev.kind] || 'Device')];
+  if (key === 'apps') { const a = p.apps || []; return [a.length ? esc(a.join(', ')) : `<span class="unset">${esc(uiText('No games yet'))}</span>`]; }
+  if (key === 'device') return [esc(dev.firmware ? uiText('Firmware ') + dev.firmware : KINDS[dev.kind] || uiText('Device'))];
   if (key.startsWith('btn:')) {
     const b = (btnData[dev.id] || []).find(x => x.name === key.slice(4)); if (!b) return [''];
     const skey = btnLayer === 'normal' ? b.name : b.name + '/hypershift';
@@ -1315,29 +1327,29 @@ function profileHeader(n) {
   const active = n === dev.active, p = prof(n);
   const th = el('th', { scope: 'col', className: active ? 'c-on' : 'c-other' });
   const title = el('div', { className: 'pname' }, el('span', { textContent: n }),
-    active ? el('span', { className: 'live', textContent: 'Active' })
-      : el('button', { className: 'mk', textContent: 'Make active', onclick: () => activate(n) }));
+    active ? el('span', { className: 'live', textContent: uiText('Active') })
+      : el('button', { className: 'mk', textContent: uiText('Make active'), onclick: () => activate(n) }));
   const games = el('div', { className: 'games' });
   (p.apps || []).forEach(a => games.append(el('span', { className: 'game' }, a,
-    el('button', { innerHTML: icon('x'), title: 'Remove ' + a, ariaLabel: `Remove ${a} from ${n}`, onclick: () => saveApps(n, (p.apps || []).filter(v => v !== a), 'Removed ' + a) }))));
-  const add = el('button', { className: 'addgame', innerHTML: icon('plus') + ((p.apps || []).length ? 'Game' : 'Game or app'),
-    title: `Switch to ${n} while this program is in front` });
+    el('button', { innerHTML: icon('x'), title: uiText('Remove ') + a, ariaLabel: uiText`Remove ${a} from ${n}`, onclick: () => saveApps(n, (p.apps || []).filter(v => v !== a), uiText('Removed ') + a) }))));
+  const add = el('button', { className: 'addgame', innerHTML: icon('plus') + ((p.apps || []).length ? uiText('Game') : uiText('Game or app')),
+    title: uiText`Switch to ${n} while this program is in front` });
   add.onclick = () => {
-    const input = el('input', { type: 'text', className: 'gamein', placeholder: 'cs2.exe', autocomplete: 'off', ariaLabel: `Program that brings up ${n}` });
+    const input = el('input', { type: 'text', className: 'gamein', placeholder: 'cs2.exe', autocomplete: 'off', ariaLabel: uiText`Program that brings up ${n}` });
     input.setAttribute('list', 'appList-' + n.replace(/\W/g, '_'));
     const list = el('datalist', { id: 'appList-' + n.replace(/\W/g, '_') });
     api('/api/apps').then(r => r.apps.filter(a => !(p.apps || []).includes(a)).forEach(a => list.append(new Option(a)))).catch(() => {});
     const done = () => { input.replaceWith(add); list.remove(); };
     input.onkeydown = e => {
       if (e.key === 'Escape') done();
-      if (e.key === 'Enter' && input.value.trim()) { saveApps(n, [...(p.apps || []), input.value.trim()], 'Added ' + input.value.trim() + ' to ' + n); }
+      if (e.key === 'Enter' && input.value.trim()) { saveApps(n, [...(p.apps || []), input.value.trim()], uiText('Added ') + input.value.trim() + uiText(' to ') + n); }
     };
     input.onblur = () => setTimeout(() => { if (document.activeElement !== input) done(); }, 150);
     add.replaceWith(input); input.after(list); input.focus();
   };
   games.append(add);
   th.append(title, games);
-  if (dev.profiles.length > 1) th.append(el('button', { className: 'del', textContent: 'Delete profile', onclick: () => deleteProfile(n) }));
+  if (dev.profiles.length > 1) th.append(el('button', { className: 'del', textContent: uiText('Delete profile'), onclick: () => deleteProfile(n) }));
   return th;
 }
 
@@ -1367,27 +1379,27 @@ function appsEditor(box) {
   const n = dev.active, apps = dev.profile.apps || [];
   const games = el('div', { className: 'games' });
   apps.forEach(a => games.append(el('span', { className: 'game' }, a,
-    el('button', { innerHTML: icon('x'), title: 'Remove ' + a, ariaLabel: `Remove ${a}`, onclick: () => saveApps(n, apps.filter(v => v !== a), 'Removed ' + a) }))));
-  if (!apps.length) games.append(el('span', { className: 'hint', textContent: 'No games or apps yet.' }));
-  const input = el('input', { type: 'text', placeholder: 'cs2.exe', autocomplete: 'off', ariaLabel: 'Program that brings up ' + n });
+    el('button', { innerHTML: icon('x'), title: uiText('Remove ') + a, ariaLabel: uiText`Remove ${a}`, onclick: () => saveApps(n, apps.filter(v => v !== a), uiText('Removed ') + a) }))));
+  if (!apps.length) games.append(el('span', { className: 'hint', textContent: uiText('No games or apps yet.') }));
+  const input = el('input', { type: 'text', placeholder: 'cs2.exe', autocomplete: 'off', ariaLabel: uiText('Program that brings up ') + n });
   input.setAttribute('list', 'appList');
   const list = el('datalist', { id: 'appList' });
   api('/api/apps').then(r => r.apps.filter(a => !apps.includes(a)).forEach(a => list.append(new Option(a)))).catch(() => {});
-  const add = () => { const v = input.value.trim(); if (v) saveApps(n, [...apps, v], 'Added ' + v + ' to ' + n); };
+  const add = () => { const v = input.value.trim(); if (v) saveApps(n, [...apps, v], uiText('Added ') + v + uiText(' to ') + n); };
   input.onkeydown = e => { if (e.key === 'Enter') add(); };
   box.append(
-    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Games and apps that bring up ' + n }), games),
-    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Add one' }),
-      el('div', { className: 'row' }, input, list, el('button', { className: 'ghost', innerHTML: icon('plus') + 'Add', onclick: add }))),
-    el('p', { className: 'note', textContent: 'Running programs are suggested as you type. While one is in front, the tray switches to this profile, then back when you leave it.' }));
-  if (dev.profiles.length > 1) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'This profile' }),
-    el('div', { className: 'row' }, el('button', { className: 'ghost danger', textContent: 'Delete ' + n, onclick: () => deleteProfile(n) }))));
+    el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Games and apps that bring up ') + n }), games),
+    el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Add one') }),
+      el('div', { className: 'row' }, input, list, el('button', { className: 'ghost', innerHTML: icon('plus') + uiText('Add'), onclick: add }))),
+    el('p', { className: 'note', textContent: uiText('Running programs are suggested as you type. While one is in front, the tray switches to this profile, then back when you leave it.') }));
+  if (dev.profiles.length > 1) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('This profile') }),
+    el('div', { className: 'row' }, el('button', { className: 'ghost danger', textContent: uiText('Delete ') + n, onclick: () => deleteProfile(n) }))));
 }
 
 function lightingControlEditor(box) {
   const target = dev;
   const input = el('input', { type: 'checkbox', className: 'switch', id: 'lightingControl', checked: dev.lighting_control,
-    ariaLabel: 'Secretarybird controls lighting' });
+    ariaLabel: uiText('Secretarybird controls lighting') });
   input.setAttribute('aria-describedby', 'lightingControlHelp');
   input.onchange = async () => {
     const enabled = input.checked;
@@ -1396,37 +1408,37 @@ function lightingControlEditor(box) {
       const r = await api('/api/lighting-control', { id: target.id, enabled });
       target.lighting_control = r.lighting_control;
       if (dev === target) { render(); $('lightingControl')?.focus({ preventScroll: true }); }
-      toast(enabled ? 'Lighting control enabled' : 'Lighting left untouched for another app');
+      toast(enabled ? uiText('Lighting control enabled') : uiText('Lighting left untouched for another app'));
     } catch (e) { input.checked = !enabled; toast(e.message, true); }
     input.disabled = false;
   };
   box.append(el('div', { className: 'edgroup' },
-    el('div', { className: 'row' }, input, el('label', { htmlFor: 'lightingControl', textContent: 'Secretarybird controls lighting' })),
-    el('p', { className: 'note', id: 'lightingControlHelp', textContent: 'Off leaves this device’s RGB untouched so another app can control it. Sync, profile changes, startup and wake skip its lighting. DPI, buttons and other settings still work.' })),
-    el('p', { className: 'note', textContent: 'Applies to this device, across all profiles. Saved colors are kept. Turning this on sends nothing immediately; edit lighting or apply a profile to use them again.' }));
+    el('div', { className: 'row' }, input, el('label', { htmlFor: 'lightingControl', textContent: uiText('Secretarybird controls lighting') })),
+    el('p', { className: 'note', id: 'lightingControlHelp', textContent: uiText('Off leaves this device’s RGB untouched so another app can control it. Sync, profile changes, startup and wake skip its lighting. DPI, buttons and other settings still work.') })),
+    el('p', { className: 'note', textContent: uiText('Applies to this device, across all profiles. Saved colors are kept. Turning this on sends nothing immediately; edit lighting or apply a profile to use them again.') }));
 }
 
 function deviceEditor(box) {
   const facts = el('dl', { className: 'facts' });
-  [['Kind', KINDS[dev.kind] || 'Device'], ['Firmware', dev.firmware], ['Serial', dev.serial], ['Battery', dev.battery != null && dev.battery + '%'],
-   ['Product id', dev.pid], ['Device list', dev.known ? 'Known model' : 'Not in the device database yet']]
+  [[uiText('Kind'), KINDS[dev.kind] || uiText('Device')], [uiText('Firmware'), dev.firmware], [uiText('Serial'), dev.serial], [uiText('Battery'), dev.battery != null && dev.battery + '%'],
+   [uiText('Product id'), dev.pid], [uiText('Device list'), dev.known ? uiText('Known model') : uiText('Not in the device database yet')]]
     .filter(([, v]) => v).forEach(([k, v]) => facts.append(el('dt', { textContent: k }), el('dd', { className: 'num', textContent: v })));
   box.append(el('div', { className: 'edgroup' }, el('p', { className: 'lead', textContent: devLabel(dev) }), facts));
-  if (dev.firmware) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Firmware' }), firmwareCheck(),
-    el('p', { className: 'note', textContent: 'Asks apps.razer.com, the page Synapse uses, and links to Razer’s updater. Nothing is installed from here.' })));
+  if (dev.firmware) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Firmware') }), firmwareCheck(),
+    el('p', { className: 'note', textContent: uiText('Asks apps.razer.com, the page Synapse uses, and links to Razer’s updater. Nothing is installed from here.') })));
 }
 
 function colorPicker(current, onPick) {
-  const presets = el('div', { className: 'presets', role: 'group', ariaLabel: 'Colors' });
+  const presets = el('div', { className: 'presets', role: 'group', ariaLabel: uiText('Colors') });
   const mark = c => presets.querySelectorAll('button').forEach(b => b.ariaPressed = b.dataset.c === c);
   PRESETS.forEach(([c, n]) => { const b = el('button', { title: n + ' #' + c, ariaLabel: n, onclick: () => { onPick(c); sync(c); } });
     b.dataset.c = c; b.style.background = '#' + c; presets.append(b); });
-  const pick = el('input', { type: 'color', ariaLabel: 'Custom color', value: '#' + (current || '808080').toLowerCase(), oninput: e => { onPick(e.target.value.slice(1).toUpperCase()); hex.value = e.target.value.toUpperCase(); } });
-  const hex = el('input', { type: 'text', className: 'hex', maxLength: 7, ariaLabel: 'Hex color', value: current ? '#' + current : '', placeholder: 'Not set',
-    onchange: e => { const v = e.target.value.replace('#', '').toUpperCase(); if (/^[0-9A-F]{6}$/.test(v)) { onPick(v); sync(v); } else toast('Use six hex digits, like FF2800', true); } });
+  const pick = el('input', { type: 'color', ariaLabel: uiText('Custom color'), value: '#' + (current || '808080').toLowerCase(), oninput: e => { onPick(e.target.value.slice(1).toUpperCase()); hex.value = e.target.value.toUpperCase(); } });
+  const hex = el('input', { type: 'text', className: 'hex', maxLength: 7, ariaLabel: uiText('Hex color'), value: current ? '#' + current : '', placeholder: uiText('Not set'),
+    onchange: e => { const v = e.target.value.replace('#', '').toUpperCase(); if (/^[0-9A-F]{6}$/.test(v)) { onPick(v); sync(v); } else toast(uiText('Use six hex digits, like FF2800'), true); } });
   const sync = c => { pick.value = '#' + c.toLowerCase(); hex.value = '#' + c; mark(c); };
   mark(current);
-  const well = el('label', { className: 'swatch' + (current ? '' : ' none'), title: 'Any color' }, pick);
+  const well = el('label', { className: 'swatch' + (current ? '' : ' none'), title: uiText('Any color') }, pick);
   pick.addEventListener('input', () => well.classList.remove('none'));
   presets.addEventListener('click', () => well.classList.remove('none'));
   return [presets, el('div', { className: 'row' }, well, hex)];
@@ -1435,67 +1447,67 @@ function colorPicker(current, onPick) {
 function zoneEditor(box, name) {
   const z = zoneOf(dev.profile, name);
   const [presets, custom] = colorPicker(z.color || '', c => setColor(c, name));
-  const bright = el('input', { type: 'range', min: 0, max: 100, value: z.brightness ?? 100, ariaLabel: 'Brightness', disabled: !z.color, id: 'zoneBright' });
+  const bright = el('input', { type: 'range', min: 0, max: 100, value: z.brightness ?? 100, ariaLabel: uiText('Brightness'), disabled: !z.color, id: 'zoneBright' });
   const val = el('span', { className: 'val num', id: 'zoneBrightVal',
-    textContent: !z.color ? 'Pick a color first' : z.brightness != null ? z.brightness + '%' : '100% (default)' });
+    textContent: !z.color ? uiText('Pick a color first') : z.brightness != null ? z.brightness + '%' : uiText('100% (default)') });
   bright.oninput = e => { const v = +e.target.value; val.textContent = v + '%'; record(name, { brightness: v }); sendBright([name, v]); };
   const on = el('input', { type: 'checkbox', className: 'switch', checked: !!z.color && !z.off, id: 'zoneOn' });
   on.onchange = async e => {
     try {
       if (e.target.checked) setColor(zoneOf(dev.profile, name).color || 'E8782A', name);
-      else { record(name, { off: true }); await api('/api/off', { zone: name }); toast(label(name) + ' off · saved to ' + dev.active); }
+      else { record(name, { off: true }); await api('/api/off', { zone: name }); toast(label(name) + uiText(' off · saved to ') + dev.active); }
     } catch (err) { toast(err.message, true); }
   };
   box.append(effectGroup(name),
-    el('div', { className: 'edgroup' }, el('h3', { textContent: label(name) + ' color' }), presets, custom),
-    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Brightness' }), el('div', { className: 'row' }, bright, val),
-      el('div', { className: 'row' }, on, el('label', { htmlFor: 'zoneOn', textContent: 'Lit' }))),
+    el('div', { className: 'edgroup' }, el('h3', { textContent: label(name) + uiText(' color') }), presets, custom),
+    el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Brightness') }), el('div', { className: 'row' }, bright, val),
+      el('div', { className: 'row' }, on, el('label', { htmlFor: 'zoneOn', textContent: uiText('Lit') }))),
     copyGroup(name));
 }
 // Use this zone's colour or effect elsewhere: this device's other zones, or every device.
 function copyGroup(name) {
   const others = devices.some(d => d !== dev && d.lighting_control && d.leds.length);
   if (dev.leds.length < 2 && !others) return '';
-  const pick = fn => () => { const what = zoneLighting(name); if (what) fn(what); else toast('Pick a color or effect first', true); };
-  return el('div', { className: 'edgroup' }, el('h3', { textContent: 'Use this lighting on' }),
+  const pick = fn => () => { const what = zoneLighting(name); if (what) fn(what); else toast(uiText('Pick a color or effect first'), true); };
+  return el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Use this lighting on') }),
     el('div', { className: 'row' },
-      dev.leds.length > 1 ? el('button', { className: 'ghost', textContent: 'All zones', title: 'Every zone of this ' + (KINDS[dev.kind] || 'device').toLowerCase(), onclick: pick(() => copyToZones(name)) }) : '',
-      others ? el('button', { className: 'ghost', textContent: 'Every device', title: 'Every device with lighting control enabled, started together', onclick: pick(what => sendSync(what)) }) : ''),
-    el('p', { className: 'note', textContent: 'Effects start together. Devices with lighting control off, or that can’t run the effect, are left as they are.' }));
+      dev.leds.length > 1 ? el('button', { className: 'ghost', textContent: uiText('All zones'), title: uiText('Every zone of this ') + (KINDS[dev.kind] || 'device').toLowerCase(), onclick: pick(() => copyToZones(name)) }) : '',
+      others ? el('button', { className: 'ghost', textContent: uiText('Every device'), title: uiText('Every device with lighting control enabled, started together'), onclick: pick(what => sendSync(what)) }) : ''),
+    el('p', { className: 'note', textContent: uiText('Effects start together. Devices with lighting control off, or that can’t run the effect, are left as they are.') }));
 }
 
 // Built-in effects the device runs by itself. Colors come from the zone's color above.
-const EFFECTS = [['static', 'Static color'], ['spectrum', 'Spectrum cycling'], ['wave', 'Wave'],
-  ['breathing', 'Breathing'], ['reactive', 'Reactive'], ['starlight', 'Starlight'], ['battery', 'Mouse battery']];
+const EFFECTS = [['static', uiText('Static color')], ['spectrum', uiText('Spectrum cycling')], ['wave', uiText('Wave')],
+  ['breathing', uiText('Breathing')], ['reactive', uiText('Reactive')], ['starlight', uiText('Starlight')], ['battery', uiText('Mouse battery')]];
 function effectLabel(e) {
   const [kind, rest = ''] = e.split(':'), [arg, n] = rest.split('@');
   const name = (EFFECTS.find(x => x[0] === kind) || [kind, kind])[1];
   if (kind === 'wave') return `${name} ${arg === 'left' ? '←' : '→'}`;
   if (arg && arg !== 'random') return name + ' #' + arg.split(',')[0];
-  return arg === 'random' ? name + ' · random' : name;
+  return arg === 'random' ? name + uiText(' · random') : name;
 }
 function effectGroup(name) {
   const z = zoneOf(dev.profile, name), cur = z.effect || '';
   const [kind0, rest = ''] = cur.split(':'), [arg0, n0] = rest.split('@');
   const kind = cur ? kind0 : 'static';
-  const sel = el('select', { id: 'zoneFx', ariaLabel: 'Effect' });
+  const sel = el('select', { id: 'zoneFx', ariaLabel: uiText('Effect') });
   // Battery is offered for a dock's light only (#39), where Synapse has its battery-level
   // lighting. The dock takes reactive and starlight but shows nothing, so those are left out.
   const dockOnly = ['battery'], notOnDock = ['reactive', 'starlight'];
   EFFECTS.filter(([v]) => name === 'dock' ? !notOnDock.includes(v) : !dockOnly.includes(v)).forEach(([v, t]) => sel.append(new Option(t, v, false, v === kind)));
-  const dir = el('select', { ariaLabel: 'Wave direction' });
-  [['right', 'Right →'], ['left', '← Left']].forEach(([v, t]) => dir.append(new Option(t, v, false, kind === 'wave' && v === (arg0 || 'right'))));
-  const speed = el('input', { type: 'range', min: 1, max: 5, step: 1, value: kind === 'wave' ? (n0 || 3) : 3, ariaLabel: 'Wave speed' });
-  const dur = el('select', { ariaLabel: 'Duration' });
-  [['1', 'Short'], ['2', 'Medium'], ['3', 'Long']].forEach(([v, t]) => dur.append(new Option(t, v, false, v === (n0 || '2'))));
+  const dir = el('select', { ariaLabel: uiText('Wave direction') });
+  [['right', uiText('Right →')], ['left', uiText('← Left')]].forEach(([v, t]) => dir.append(new Option(t, v, false, kind === 'wave' && v === (arg0 || 'right'))));
+  const speed = el('input', { type: 'range', min: 1, max: 5, step: 1, value: kind === 'wave' ? (n0 || 3) : 3, ariaLabel: uiText('Wave speed') });
+  const dur = el('select', { ariaLabel: uiText('Duration') });
+  [['1', uiText('Short')], ['2', uiText('Medium')], ['3', uiText('Long')]].forEach(([v, t]) => dur.append(new Option(t, v, false, v === (n0 || '2'))));
   const rnd = el('input', { type: 'checkbox', id: 'fxRandom', checked: arg0 === 'random' });
-  const rndLabel = el('label', { htmlFor: 'fxRandom', textContent: 'Random colors' });
+  const rndLabel = el('label', { htmlFor: 'fxRandom', textContent: uiText('Random colors') });
   const note = el('p', { className: 'note' });
   const show = () => {
     const k = sel.value;
     note.textContent = k === 'battery'
-      ? 'Green when the mouse is charged, through yellow and orange to red when it’s nearly empty. Secretarybird updates it every 5 minutes.'
-      : 'Runs on the device itself. Not every device has every effect; it says so if not.';
+      ? uiText('Green when the mouse is charged, through yellow and orange to red when it’s nearly empty. Secretarybird updates it every 5 minutes.')
+      : uiText('Runs on the device itself. Not every device has every effect; it says so if not.');
     dir.hidden = speed.hidden = k !== 'wave';
     dur.hidden = !(k === 'reactive' || k === 'starlight');
     rnd.hidden = rndLabel.hidden = !(k === 'breathing' || k === 'starlight');
@@ -1512,33 +1524,33 @@ function effectGroup(name) {
     try {
       await api('/api/effect', { zone: name, effect: text });
       record(name, { effect: text, off: false });
-      toast(effectLabel(text) + ' · saved to ' + dev.active);
+      toast(effectLabel(text) + uiText(' · saved to ') + dev.active);
     } catch (e) { toast(e.message, true); sel.value = (zoneOf(dev.profile, name).effect || 'static').split(':')[0]; show(); }
   };
   [sel, dir, speed, dur, rnd].forEach(c => c.onchange = send);
   show();
-  return el('div', { className: 'edgroup' }, el('h3', { textContent: 'Effect' }),
+  return el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Effect') }),
     el('div', { className: 'row' }, sel, dir, speed, dur, rnd, rndLabel), note);
 }
 
 function keysEditor(box) {
   const [presets, custom] = colorPicker(brush, c => { brush = c; });
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.id = 'kb'; svg.setAttribute('aria-label', 'Keyboard: click or drag across keys to paint them');
+  svg.id = 'kb'; svg.setAttribute('aria-label', uiText('Keyboard: click or drag across keys to paint them'));
   box.append(
-    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Brush' }), presets, custom),
-    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Quick' }),
-      el('button', { className: 'ghost', textContent: 'Fill all keys', onclick: () => setKeys(Array(keyCount()).fill(brush)) }),
-      el('button', { className: 'ghost', textContent: 'Back to whole keyboard', onclick: () => { const c = dev.leds[0] && (zoneOf(dev.profile, dev.leds[0].name).color || brush); if (c) setColor(c, dev.leds[0].name); } }),
-      el('button', { className: 'ghost', textContent: 'Find which light is which key…', onclick: () => { box.innerHTML = ''; findLights(box); } })),
-    knownLayout(dev.matrix, dev.kind) ? el('div', { className: 'edgroup' }, el('h3', { textContent: 'Layout' }), (() => {
-      const pick = el('select', { ariaLabel: 'Keyboard layout', onchange: () => { remember('kblayout-' + dev.id, pick.value); renderKb(svg); } });
+    el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Brush') }), presets, custom),
+    el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Quick') }),
+      el('button', { className: 'ghost', textContent: uiText('Fill all keys'), onclick: () => setKeys(Array(keyCount()).fill(brush)) }),
+      el('button', { className: 'ghost', textContent: uiText('Back to whole keyboard'), onclick: () => { const c = dev.leds[0] && (zoneOf(dev.profile, dev.leds[0].name).color || brush); if (c) setColor(c, dev.leds[0].name); } }),
+      el('button', { className: 'ghost', textContent: uiText('Find which light is which key…'), onclick: () => { box.innerHTML = ''; findLights(box); } })),
+    knownLayout(dev.matrix, dev.kind) ? el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Layout') }), (() => {
+      const pick = el('select', { ariaLabel: uiText('Keyboard layout'), onchange: () => { remember('kblayout-' + dev.id, pick.value); renderKb(svg); } });
       KB_LAYOUTS.forEach(([v, t]) => pick.append(new Option(t, v, false, v === kbLayout())));
       return pick;
     })()) : null,
     el('p', { className: 'note', textContent: knownLayout(dev.matrix, dev.kind)
-      ? 'Pick a brush color, then click or drag across keys to paint them.'
-      : 'This keyboard’s key layout isn’t known yet, so each square is one of its lights, in rows from the top left. Paint one to see which key lights up.' }),
+      ? uiText('Pick a brush color, then click or drag across keys to paint them.')
+      : uiText('This keyboard’s key layout isn’t known yet, so each square is one of its lights, in rows from the top left. Paint one to see which key lights up.') }),
     el('div', { className: 'kbwrap' }, svg));
   renderKb(svg);
 }
@@ -1557,11 +1569,11 @@ function findLights(box) {
   const show = live(i => api('/api/find-light', { light: [Math.floor(i / cols), i % cols] }), () => null);
   finding = dev.id;
   const where = el('p', { className: 'hint', ariaLive: 'polite' });
-  const input = el('input', { type: 'text', placeholder: 'e.g. Num ,  or  Volume dial', ariaLabel: 'Key that lit up' });
+  const input = el('input', { type: 'text', placeholder: uiText('e.g. Num ,  or  Volume dial'), ariaLabel: uiText('Key that lit up') });
   const grid = el('div', { className: 'lightgrid', style: `grid-template-columns: repeat(${cols}, minmax(0, 1fr))` });
   const cells = [];
   for (let i = 0; i < rows * cols; i++) {
-    const b = el('button', { title: `Row ${Math.floor(i / cols) + 1}, light ${i % cols + 1}`, onclick: () => go(i) });
+    const b = el('button', { title: uiText`Row ${Math.floor(i / cols) + 1}, light ${i % cols + 1}`, onclick: () => go(i) });
     cells.push(b); grid.append(b);
   }
   const keep = () => {
@@ -1572,14 +1584,14 @@ function findLights(box) {
   const draw = () => cells.forEach((b, i) => {
     const n = names[i];
     b.textContent = n === '-' ? '–' : n || '';
-    b.className = (i === at ? 'at ' : '') + (n === '-' ? 'none' : n ? 'named' : '');
+    b.className = (i === at ? uiText('at ') : '') + (n === '-' ? 'none' : n ? 'named' : '');
   });
   const go = i => {
     keep();
     at = (i + rows * cols) % (rows * cols);
     input.value = names[at] || '';
-    where.textContent = `Row ${Math.floor(at / cols) + 1} of ${rows}, light ${at % cols + 1} of ${cols} is lit. Which key is it?` +
-      (guess[at] ? ` The editor has it as “${guess[at]}”.` : '');
+    where.textContent = uiText`Row ${Math.floor(at / cols) + 1} of ${rows}, light ${at % cols + 1} of ${cols} is lit. Which key is it?` +
+      (guess[at] ? uiText` The editor has it as “${guess[at]}”.` : '');
     draw(); show(at); input.focus();
   };
   input.onkeydown = e => {
@@ -1591,21 +1603,21 @@ function findLights(box) {
     keep();
     const done = Object.keys(names).map(Number).sort((a, b) => a - b);
     const lines = done.map(i => `${Math.floor(i / cols) + 1},${i % cols + 1}: ${names[i] === '-' ? '(nothing)' : names[i]}`);
-    const text = `Light map for ${dev.name} (${dev.pid}), ${rows} x ${cols} grid, row,light: key\n` + lines.join('\n');
-    try { await navigator.clipboard.writeText(text); toast(`Copied ${done.length} of ${rows * cols}. Paste it into your GitHub issue`); }
+    const text = uiText`Light map for ${dev.name} (${dev.pid}), ${rows} x ${cols} grid, row,light: key\n` + lines.join('\n');
+    try { await navigator.clipboard.writeText(text); toast(uiText`Copied ${done.length} of ${rows * cols}. Paste it into your GitHub issue`); }
     catch (e) { toast(e.message, true); }
   };
   box.append(
-    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Find which light is which key' }),
-      el('p', { className: 'note', textContent: 'One light on your keyboard is on at a time. Type the key it is under and press Enter for the next one. Keys that stay dark: press Nothing lit. Click any square to jump to it. Your answers are kept if you stop halfway.' }),
+    el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Find which light is which key') }),
+      el('p', { className: 'note', textContent: uiText('One light on your keyboard is on at a time. Type the key it is under and press Enter for the next one. Keys that stay dark: press Nothing lit. Click any square to jump to it. Your answers are kept if you stop halfway.') }),
       where,
       el('div', { className: 'row finder' }, input,
-        el('button', { className: 'ghost', textContent: 'Nothing lit', onclick: () => { input.value = '-'; go(at + 1); } }),
-        el('button', { className: 'ghost', innerHTML: icon('left'), ariaLabel: 'Previous light', title: 'Previous', onclick: () => go(at - 1) }),
-        el('button', { className: 'ghost', innerHTML: icon('right'), ariaLabel: 'Next light', title: 'Next', onclick: () => go(at + 1) })),
+        el('button', { className: 'ghost', textContent: uiText('Nothing lit'), onclick: () => { input.value = '-'; go(at + 1); } }),
+        el('button', { className: 'ghost', innerHTML: icon('left'), ariaLabel: uiText('Previous light'), title: uiText('Previous'), onclick: () => go(at - 1) }),
+        el('button', { className: 'ghost', innerHTML: icon('right'), ariaLabel: uiText('Next light'), title: uiText('Next'), onclick: () => go(at + 1) })),
       el('div', { className: 'row' },
-        el('button', { textContent: 'Copy the list', onclick: copy }),
-        el('button', { className: 'ghost', textContent: 'Done', onclick: () => { keep(); stopFinding(); box.innerHTML = ''; keysEditor(box); } }))),
+        el('button', { textContent: uiText('Copy the list'), onclick: copy }),
+        el('button', { className: 'ghost', textContent: uiText('Done'), onclick: () => { keep(); stopFinding(); box.innerHTML = ''; keysEditor(box); } }))),
     el('div', { className: 'kbwrap' }, grid));
   go(0);
 }
@@ -1621,46 +1633,76 @@ function stopFinding(closing) {
 }
 window.addEventListener('pagehide', () => stopFinding(true));
 
+// Linking is an editing choice, not a firmware setting. Toggling it never writes DPI.
+// Start with independent axes so opening the editor cannot erase an existing X/Y pair.
+const dpiLinked = new Map();
+function dpiLinkControl() {
+  const id = dev.id;
+  return el('div', { className: 'edgroup' },
+    el('label', { className: 'row' }, el('input', { type: 'checkbox', checked: dpiLinked.get(id) === true,
+      ariaLabel: uiText('Link X/Y axes'), onchange: e => dpiLinked.set(id, e.target.checked) }), uiText('Link X/Y axes')),
+    el('p', { className: 'note', textContent: uiText('X is horizontal; Y is vertical. When linked, editing either axis sets both. Switching this option keeps the current values.') }));
+}
+function dpiLabel(d) { return d.x === d.y ? String(d.x) : d.x + ' × ' + d.y; }
+function dpiPair(current, value, axis, linked, range) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const v = Math.min(range.max, Math.max(range.min, n));
+  if (!axis || linked) return [v, v];
+  return axis === 'x' ? [v, current[1]] : [current[0], v];
+}
 function dpiEditor(box) {
   const d = dev.dpi, step = Math.max(d.step || 50, 50);
-  const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step, value: d.x, ariaLabel: 'DPI', id: 'dpiNum' });
-  const slider = el('input', { type: 'range', min: d.min, max: d.max, step: d.step, value: d.x, ariaLabel: 'DPI slider', id: 'dpiSlider' });
-  const pills = el('div', { className: 'chips5', id: 'dpiPills', role: 'group', ariaLabel: 'DPI presets' });
+  const fmt = n => n.toLocaleString(uiI18n.language);
+  box.append(dpiLinkControl());
+  for (const axis of ['x', 'y']) {
+    const upper = axis.toUpperCase();
+    const axisLabel = axis === 'x' ? uiText('X-axis DPI') : uiText('Y-axis DPI');
+    const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step,
+      value: d[axis], ariaLabel: axisLabel, id: 'dpiNum' + upper });
+    const slider = el('input', { type: 'range', min: d.min, max: d.max, step: d.step, value: d[axis],
+      ariaLabel: axis === 'x' ? uiText('X-axis DPI slider') : uiText('Y-axis DPI slider'), id: 'dpiSlider' + upper });
+    num.oninput = () => { num.dataset.dirty = '1'; };
+    num.onchange = e => { delete num.dataset.dirty; if (!setDpi(e.target.value, axis)) showDpi(); };
+    num.onkeydown = e => { if (e.key === 'Enter') num.blur(); };
+    slider.oninput = e => setDpi(e.target.value, axis);
+    // - / + move to the next multiple of the step, within the range.
+    const nudge = dir => setDpi((Math.round((+num.value || dev.dpi[axis]) / step) + dir) * step, axis);
+    const stepBtn = (dir, ic, label) => el('button', { className: 'step', innerHTML: icon(ic), ariaLabel: label,
+      title: label + ' (' + step + ')', onclick: () => nudge(dir) });
+    box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: axis === 'x' ? uiText('X axis (horizontal)') : uiText('Y axis (vertical)') }),
+      el('div', { className: 'readout' }, stepBtn(-1, 'minus', uiText`Lower ${upper} DPI`),
+        el('label', {}, num, el('span', { className: 'unit', textContent: 'DPI' })), stepBtn(1, 'plus', uiText`Higher ${upper} DPI`)),
+      el('div', { className: 'scale' }, slider, el('div', { className: 'ends num', ariaHidden: 'true' },
+        el('span', { textContent: fmt(d.min) }), el('span', { textContent: fmt(d.max) })))));
+  }
+  const pills = el('div', { className: 'chips5', id: 'dpiPills', role: 'group', ariaLabel: uiText('DPI presets') });
   [400, 800, 1600, 3200, 6400].filter(v => v >= d.min && v <= d.max).forEach(v =>
-    pills.append(el('button', { className: 'pill num', textContent: v, ariaPressed: v === d.x, onclick: () => setDpi(v) })));
-  num.oninput = () => { num.dataset.dirty = '1'; };
-  num.onchange = e => { delete num.dataset.dirty; setDpi(e.target.value); };
-  num.onkeydown = e => { if (e.key === 'Enter') num.blur(); };
-  slider.oninput = e => setDpi(e.target.value);
-  // - / + move to the next multiple of the step, within the range.
-  const nudge = dir => setDpi(Math.min(d.max, Math.max(d.min, (Math.round((+num.value || dev.dpi.x) / step) + dir) * step)));
-  const stepBtn = (dir, ic, label) => el('button', { className: 'step', innerHTML: icon(ic), ariaLabel: label, title: label + ' (' + step + ')', onclick: () => nudge(dir) });
-  const fmt = n => n.toLocaleString('en-US');
+    pills.append(el('button', { className: 'pill num', textContent: v, ariaPressed: v === d.x && v === d.y, onclick: () => setDpi(v) })));
   box.append(
-    el('div', { className: 'readout' }, stepBtn(-1, 'minus', 'Lower DPI'),
-      el('label', {}, num, el('span', { className: 'unit', textContent: 'DPI' })), stepBtn(1, 'plus', 'Higher DPI')),
-    el('div', { className: 'scale' }, slider, el('div', { className: 'ends num', ariaHidden: 'true' }, el('span', { textContent: fmt(d.min) }), el('span', { textContent: fmt(d.max) }))),
-    pills.childElementCount ? el('div', { className: 'edgroup' }, el('h3', { textContent: 'Presets' }), pills) : '',
-    el('p', { className: 'note', textContent: 'The DPI button on the mouse changes this too; this follows it.' }));
+    pills.childElementCount ? el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Presets (both axes)') }), pills) : '',
+    el('p', { className: 'note', textContent: uiText('The DPI button on the mouse changes this too; this follows it.') }));
 }
 function showDpi() { // the mouse changed DPI by itself
   refreshCell('dpi'); refreshCell('stages');
-  const n = $('dpiNum'), s = $('dpiSlider');
-  if (n && !n.dataset.dirty) n.value = dev.dpi.x; // follow the mouse unless a new value is being typed
-  if (s && document.activeElement !== s) s.value = dev.dpi.x;
-  document.querySelectorAll('#dpiPills .pill').forEach(p => p.ariaPressed = +p.textContent === dev.dpi.x);
+  for (const axis of ['x', 'y']) {
+    const n = $('dpiNum' + axis.toUpperCase()), s = $('dpiSlider' + axis.toUpperCase());
+    if (n && !n.dataset.dirty) n.value = dev.dpi[axis]; // don't overwrite a value being typed
+    if (s && document.activeElement !== s) s.value = dev.dpi[axis];
+  }
+  document.querySelectorAll('#dpiPills .pill').forEach(p => p.ariaPressed = +p.textContent === dev.dpi.x && +p.textContent === dev.dpi.y);
 }
 
 function pollingEditor(box) {
-  const seg = el('div', { className: 'seg', role: 'group', ariaLabel: 'Polling rate' });
+  const seg = el('div', { className: 'seg', role: 'group', ariaLabel: uiText('Polling rate') });
   dev.polling.options.forEach(v => seg.append(el('button', { className: 'num', textContent: hz(v), ariaPressed: v === dev.polling.hz,
     onclick: async () => {
       try { await api('/api/polling', { hz: v }); dev.polling.hz = v; dev.profile.polling = v;
-        seg.querySelectorAll('button').forEach(b => b.ariaPressed = b.textContent === hz(v)); refreshCell('polling'); toast('Polling ' + hz(v) + ' · saved to ' + dev.active); }
+        seg.querySelectorAll('button').forEach(b => b.ariaPressed = b.textContent === hz(v)); refreshCell('polling'); toast(uiText('Polling ') + hz(v) + uiText(' · saved to ') + dev.active); }
       catch (e) { toast(e.message, true); }
     } })));
-  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Reports per second' }), seg),
-    el('p', { className: 'note', textContent: 'Higher is smoother and uses a little more CPU. 1000 Hz suits almost everyone.' }));
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Reports per second') }), seg),
+    el('p', { className: 'note', textContent: uiText('Higher is smoother and uses a little more CPU. 1000 Hz suits almost everyone.') }));
 }
 
 // DPI stages of a profile: the active column shows the mouse, following its DPI button.
@@ -1675,41 +1717,56 @@ function stagesOf(name) {
 }
 
 function stagesEditor(box) {
-  const d = dev.dpi || { min: 100, max: 30000, step: 50 };
-  const st = stagesOf(dev.active), list = st.list.map(v => v.slice());
+  const target = dev, profile = target.profile;
+  const d = target.dpi || { min: 100, max: 30000, step: 50 };
+  const st = stagesOf(target.active), list = st.list.map(v => v.slice());
   let active = st.active;
   const rowsBox = el('div', { className: 'edgroup', id: 'stageRows' });
-  const add = el('button', { className: 'ghost', innerHTML: icon('plus') + 'Add stage' });
+  const add = el('button', { className: 'ghost', innerHTML: icon('plus') + uiText('Add stage'), ariaLabel: uiText('Add stage') });
   const draw = () => {
     rowsBox.innerHTML = '';
     list.forEach((v, i) => {
-      const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step, value: v[0],
-        ariaLabel: 'Stage ' + (i + 1) + ' DPI', onchange: e => { const n = Math.round(+e.target.value); if (n) { list[i] = [n, n]; save(); } } });
+      const values = el('div', { className: 'stage-values' });
+      for (const [at, axis] of ['x', 'y'].entries()) {
+        const upper = axis.toUpperCase();
+        const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step, value: v[at],
+          ariaLabel: uiText`Stage ${i + 1} ${upper} DPI`, onchange: e => {
+            const pair = dpiPair(list[i], e.target.value, axis, dpiLinked.get(target.id) === true, d);
+            if (pair) { list[i] = pair; save(); } else draw();
+          } });
+        values.append(el('label', {}, upper, num));
+      }
       const use = el('input', { type: 'radio', name: 'stageUse', checked: i + 1 === active, id: 'stageUse' + i,
         onchange: () => { active = i + 1; save(); } });
-      const del = el('button', { className: 'ghost', innerHTML: icon('x'), title: 'Remove stage ' + (i + 1), ariaLabel: 'Remove stage ' + (i + 1),
+      const del = el('button', { className: 'ghost', innerHTML: icon('x'), title: uiText('Remove stage ') + (i + 1), ariaLabel: uiText('Remove stage ') + (i + 1),
         disabled: list.length === 1, onclick: () => { list.splice(i, 1); if (active > i + 1 || active > list.length) active = Math.max(1, active - 1); save(); } });
-      rowsBox.append(el('div', { className: 'row' }, el('span', { className: 'val num', textContent: i + 1 }), num, use,
-        el('label', { htmlFor: 'stageUse' + i, textContent: 'In use' }), del));
+      rowsBox.append(el('div', { className: 'stage-row' }, el('span', { className: 'val num', textContent: i + 1 }), values, del,
+        el('label', { className: 'row stage-use' }, use, uiText('In use'))));
     });
-    add.disabled = list.length >= dev.stages.max;
+    add.disabled = list.length >= target.stages.max;
   };
-  add.onclick = () => { const next = Math.min(d.max, list[list.length - 1][0] * 2); list.push([next, next]); save(); };
+  add.onclick = () => { list.push(list[list.length - 1].map(v => Math.min(d.max, v * 2))); save(); };
+  let revision = 0;
   const save = async () => {
+    const current = ++revision;
     draw();
     try {
-      const r = await api('/api/stages', { active, stages: list });
-      dev.stages.list = r.stages.list; dev.stages.active = r.stages.active;
-      dev.profile.dpi_stages = { active: r.stages.active, stages: r.stages.list };
-      if (dev.dpi) { dev.dpi.x = r.dpi[0]; dev.dpi.y = r.dpi[1]; dev.profile.dpi = r.dpi; }
+      const r = await api('/api/stages', { id: target.id, active, stages: list });
+      if (current !== revision) return;
+      target.stages.list = r.stages.list; target.stages.active = r.stages.active;
+      profile.dpi_stages = { active: r.stages.active, stages: r.stages.list };
+      if (target.dpi) { target.dpi.x = r.dpi[0]; target.dpi.y = r.dpi[1]; profile.dpi = r.dpi; }
       r.stages.list.forEach((v, i) => { list[i] = v.slice(); });
-      draw(); refreshCell('stages'); refreshCell('dpi');
-      toast('DPI stages · saved to ' + dev.active);
+      draw();
+      if (dev === target) {
+        refreshCell('stages'); refreshCell('dpi');
+        toast(uiText('DPI stages · saved to ') + target.active);
+      }
     } catch (e) { toast(e.message, true); }
   };
   draw();
-  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Stages the DPI button cycles through' }), rowsBox, el('div', { className: 'row' }, add)),
-    el('p', { className: 'note', textContent: 'Up to ' + dev.stages.max + ' stages, stored on the mouse. The stage in use sets the DPI right away.' }));
+  box.append(dpiLinkControl(), el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Stages the DPI button cycles through') }), rowsBox, el('div', { className: 'row' }, add)),
+    el('p', { className: 'note', textContent: uiText('Up to ') + dev.stages.max + uiText(' stages, stored on the mouse. The stage in use sets the DPI right away.') }));
 }
 
 function sleepOf(name) {
@@ -1720,14 +1777,14 @@ function sleepOf(name) {
 
 function sleepEditor(box) {
   const sl = dev.sleep;
-  const val = el('span', { className: 'val num', textContent: sl.minutes + ' min' });
-  const slider = el('input', { type: 'range', min: 1, max: sl.max, step: 1, value: sl.minutes, ariaLabel: 'Minutes before sleeping',
-    disabled: sl.auto === false, oninput: e => { val.textContent = e.target.value + ' min'; }, onchange: e => send({ minutes: +e.target.value }) });
-  const group = el('div', { className: 'edgroup' }, el('h3', { textContent: 'Sleep after' }), el('div', { className: 'row' }, slider, val));
+  const val = el('span', { className: 'val num', textContent: sl.minutes + uiText(' min') });
+  const slider = el('input', { type: 'range', min: 1, max: sl.max, step: 1, value: sl.minutes, ariaLabel: uiText('Minutes before sleeping'),
+    disabled: sl.auto === false, oninput: e => { val.textContent = e.target.value + uiText(' min'); }, onchange: e => send({ minutes: +e.target.value }) });
+  const group = el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Sleep after') }), el('div', { className: 'row' }, slider, val));
   if (sl.auto != null) {
     const on = el('input', { type: 'checkbox', className: 'switch', checked: sl.auto, id: 'autoSleep',
       onchange: e => { slider.disabled = !e.target.checked; send({ auto: e.target.checked }); } });
-    group.append(el('div', { className: 'row' }, on, el('label', { htmlFor: 'autoSleep', textContent: 'Sleep when idle' })));
+    group.append(el('div', { className: 'row' }, on, el('label', { htmlFor: 'autoSleep', textContent: uiText('Sleep when idle') })));
   }
   async function send(body) {
     try {
@@ -1736,22 +1793,22 @@ function sleepEditor(box) {
       if (body.minutes) dev.profile.sleep_minutes = body.minutes;
       if (body.auto != null) dev.profile.auto_sleep = body.auto;
       refreshCell('sleep');
-      toast((body.auto === false ? 'Never sleeps' : 'Sleeps after ' + r.sleep.minutes + ' min') + ' · saved to ' + dev.active);
+      toast((body.auto === false ? uiText('Never sleeps') : uiText('Sleeps after ') + r.sleep.minutes + uiText(' min')) + uiText(' · saved to ') + dev.active);
     } catch (e) { toast(e.message, true); }
   }
   box.append(group, el('p', { className: 'note', textContent: sl.auto != null
-    ? 'Up to ' + sl.max + ' minutes on this device, or turn sleeping off. Never sleeping drains the battery faster.'
-    : 'How long the device waits, untouched, before it sleeps to save battery (1 to ' + sl.max + ' minutes).' }));
+    ? uiText('Up to ') + sl.max + uiText(' minutes on this device, or turn sleeping off. Never sleeping drains the battery faster.')
+    : uiText('How long the device waits, untouched, before it sleeps to save battery (1 to ') + sl.max + uiText(' minutes).') }));
 }
 
 // Laptops: what the keyboard backlight does when the laptop sits idle (Synapse's Smart Dimming).
-const DIMMING = { 'stays-lit': 'Stays lit', half: 'Dims to half', quarter: 'Dims to quarter', dark: 'Turns off' };
+const DIMMING = { 'stays-lit': uiText('Stays lit'), half: uiText('Dims to half'), quarter: uiText('Dims to quarter'), dark: uiText('Turns off') };
 // [how bright the keyboard stays, the line under it]
-const DIM_INFO = { 'stays-lit': [1, 'Never dims'], half: [.5, '50% brightness'], quarter: [.25, '25% brightness'], dark: [0, 'Until a keypress'] };
+const DIM_INFO = { 'stays-lit': [1, uiText('Never dims')], half: [.5, uiText('50% brightness')], quarter: [.25, uiText('25% brightness')], dark: [0, uiText('Until a keypress')] };
 function dimmingOf(name) { return name === dev.active && dev.dimming ? dev.dimming : prof(name).dimming; }
 
 function dimmingEditor(box) {
-  const grid = el('div', { className: 'dimgrid', role: 'group', ariaLabel: 'Keyboard backlight when the laptop is idle' });
+  const grid = el('div', { className: 'dimgrid', role: 'group', ariaLabel: uiText('Keyboard backlight when the laptop is idle') });
   const draw = () => [...grid.children].forEach(t => t.setAttribute('aria-pressed', t.dataset.v === dev.dimming));
   Object.entries(DIMMING).forEach(([v, text]) => {
     const [lvl, sub] = DIM_INFO[v];
@@ -1762,49 +1819,49 @@ function dimmingEditor(box) {
         const r = await api('/api/dimming', { dimming: v });
         dev.dimming = r.dimming; dev.profile.dimming = v;
         draw(); refreshCell('dimming');
-        toast('Keyboard ' + DIMMING[v].toLowerCase() + ' when idle · saved to ' + dev.active);
+        toast(uiText('Keyboard ') + DIMMING[v].toLowerCase() + uiText(' when idle · saved to ') + dev.active);
       } catch (err) { toast(err.message, true); }
       t.disabled = false;
     } }, key, el('div', {}, el('span', { className: 'tv', textContent: text }), el('span', { className: 'tl', textContent: sub }))));
   });
   draw();
-  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'When the laptop is idle' }), grid),
-    el('p', { className: 'note', textContent: 'A keypress brings it back to full brightness. Synapse calls this Smart Dimming.' }),
-    el('p', { className: 'note', textContent: 'New and not yet confirmed on a laptop. If it goes dark anyway with Stays lit, please tell us.' }));
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('When the laptop is idle') }), grid),
+    el('p', { className: 'note', textContent: uiText('A keypress brings it back to full brightness. Synapse calls this Smart Dimming.') }),
+    el('p', { className: 'note', textContent: uiText('New and not yet confirmed on a laptop. If it goes dark anyway with Stays lit, please tell us.') }));
 }
 
 // Save to mouse: the profile's button remaps written into the mouse's on-board slot, so they
 // work without Secretarybird. Remaps are live only until then. Put back undoes it.
 function onboardEditor(box) {
   const o = onboardData[dev.id], n = Object.keys(dev.profile.buttons || {}).length;
-  const status = !o ? 'Your button remaps work while Secretarybird is running. Saved on the mouse, they also work on another PC, on Linux or macOS, and before Secretarybird starts.'
-    : o.profile !== dev.active ? `${o.profile} is saved in on-board slot ${o.slot}. Saving ${dev.active} replaces it.`
-    : o.changed ? `${o.profile} was saved in on-board slot ${o.slot} and has changed since. Save again to update the mouse.`
-    : `${o.profile} is saved in on-board slot ${o.slot} (${plural(o.count, 'remapped button')}). It works without Secretarybird.`;
+  const status = !o ? uiText('Your button remaps work while Secretarybird is running. Saved on the mouse, they also work on another PC, on Linux or macOS, and before Secretarybird starts.')
+    : o.profile !== dev.active ? uiText`${o.profile} is saved in on-board slot ${o.slot}. Saving ${dev.active} replaces it.`
+    : o.changed ? uiText`${o.profile} was saved in on-board slot ${o.slot} and has changed since. Save again to update the mouse.`
+    : uiText`${o.profile} is saved in on-board slot ${o.slot} (${plural(o.count, 'remapped button')}). It works without Secretarybird.`;
   const done = (r, msg) => { btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; sel = 'onboard'; renderWork(); toast(msg); };
-  const save = el('button', { className: 'ghost', textContent: o && o.profile === dev.active ? 'Save again' : 'Save ' + dev.active + ' to the mouse',
+  const save = el('button', { className: 'ghost', textContent: o && o.profile === dev.active ? uiText('Save again') : uiText('Save ') + dev.active + uiText(' to the mouse'),
     onclick: async e => {
-      if (!o && !confirm(`Write ${dev.active}'s button remaps into the mouse's memory? What it holds now is kept, and Put back restores it.`)) return;
+      if (!o && !confirm(uiText`Write ${dev.active}'s button remaps into the mouse's memory? What it holds now is kept, and Put back restores it.`)) return;
       e.target.disabled = true;
-      try { done(await api('/api/save-to-mouse', {}), dev.active + ' saved on the mouse'); }
+      try { done(await api('/api/save-to-mouse', {}), dev.active + uiText(' saved on the mouse')); }
       catch (err) { toast(err.message, true); e.target.disabled = false; }
     } });
-  const putBack = o && el('button', { className: 'ghost', textContent: 'Put back what the mouse had', onclick: async e => {
+  const putBack = o && el('button', { className: 'ghost', textContent: uiText('Put back what the mouse had'), onclick: async e => {
     e.target.disabled = true;
-    try { done(await api('/api/put-back', {}), 'The mouse has its own settings back. Your remaps still work while Secretarybird runs.'); }
+    try { done(await api('/api/put-back', {}), uiText('The mouse has its own settings back. Your remaps still work while Secretarybird runs.')); }
     catch (err) { toast(err.message, true); e.target.disabled = false; }
   } });
   box.append(el('div', { className: 'edgroup' }, el('p', { textContent: status }),
       el('div', { className: 'row' }, save, putBack)),
-    el('p', { className: 'note', textContent: n ? 'Lighting, DPI and the sleep timer are on the mouse already; this saves the button remaps.' : 'This profile remaps no buttons, so saving it puts back anything saved before.' }),
-    el('p', { className: 'note', textContent: 'The mouse’s memory is only written when you click here, never when profiles switch.' }));
+    el('p', { className: 'note', textContent: n ? uiText('Lighting, DPI and the sleep timer are on the mouse already; this saves the button remaps.') : uiText('This profile remaps no buttons, so saving it puts back anything saved before.') }),
+    el('p', { className: 'note', textContent: uiText('The mouse’s memory is only written when you click here, never when profiles switch.') }));
 }
 
 // Gaming mode (keyboards and keypads): the keys it blocks, as `off` or like `win,alt-tab`.
-const GAMING_KEYS = [['win', 'Windows key'], ['alt-tab', 'Alt+Tab'], ['alt-f4', 'Alt+F4']];
+const GAMING_KEYS = [['win', uiText('Windows key')], ['alt-tab', 'Alt+Tab'], ['alt-f4', 'Alt+F4']];
 function gamingOf(name) { return name === dev.active && dev.game_mode ? dev.game_mode : prof(name).game_mode; }
 function gamingKeys(g) { const keys = (g || '').split(','); return GAMING_KEYS.filter(([k]) => keys.includes(k)).map(([, label]) => label); }
-function gamingText(g) { const on = gamingKeys(g); return on.length ? 'Blocks ' + on.join(', ') : 'Off'; }
+function gamingText(g) { const on = gamingKeys(g); return on.length ? uiText('Blocks ') + on.join(', ') : uiText('Off'); }
 function gamingEditor(box) {
   const rows = GAMING_KEYS.map(([k, label]) => {
     const input = el('input', { type: 'checkbox', className: 'switch', id: 'gm-' + k,
@@ -1817,15 +1874,15 @@ function gamingEditor(box) {
           dev.game_mode = r.game_mode; dev.profile.game_mode = want;
           refreshCell('gaming');
           const on = gamingKeys(dev.game_mode);
-          toast((on.length ? 'Gaming mode blocks ' + on.join(', ') : 'Gaming mode off') + ' · saved to ' + dev.active);
+          toast((on.length ? uiText('Gaming mode blocks ') + on.join(', ') : uiText('Gaming mode off')) + uiText(' · saved to ') + dev.active);
         } catch (err) { t.checked = !t.checked; toast(err.message, true); }
         t.disabled = false;
       } });
-    return el('div', { className: 'row' }, input, el('label', { htmlFor: 'gm-' + k, textContent: 'Block ' + label }));
+    return el('div', { className: 'row' }, input, el('label', { htmlFor: 'gm-' + k, textContent: uiText('Block ') + label }));
   });
-  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Keys blocked so a game isn’t left by accident' }), ...rows),
-    el('p', { className: 'note', textContent: 'Saved to this profile: tie the profile to a game (Profile → Switches with) and gaming mode comes on while you play.' }),
-    el('p', { className: 'note', textContent: 'New and not yet confirmed on a keyboard. If a blocked key still works, please tell us.' }));
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Keys blocked so a game isn’t left by accident') }), ...rows),
+    el('p', { className: 'note', textContent: uiText('Saved to this profile: tie the profile to a game (Profile → Switches with) and gaming mode comes on while you play.') }),
+    el('p', { className: 'note', textContent: uiText('New and not yet confirmed on a keyboard. If a blocked key still works, please tell us.') }));
 }
 
 // Asks Razer's public product page whether newer firmware is out. Never installs anything.
@@ -1835,18 +1892,18 @@ function firmwareCheck() {
   const show = r => {
     box.innerHTML = '';
     if (r.state === 'update') {
-      box.append(el('b', { textContent: 'Firmware ' + r.version + ' is out' }), ' · ',
-        el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Download from Razer' }));
-      if (r.guide && r.guide !== r.url) box.append(' · ', el('a', { href: r.guide, target: '_blank', rel: 'noopener noreferrer', textContent: 'Install guide' }));
-    } else box.append(r.state === 'current' ? 'Firmware is up to date' : 'Razer lists no firmware updates for it');
+      box.append(el('b', { textContent: uiText('Firmware ') + r.version + uiText(' is out') }), ' · ',
+        el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer', textContent: uiText('Download from Razer') }));
+      if (r.guide && r.guide !== r.url) box.append(' · ', el('a', { href: r.guide, target: '_blank', rel: 'noopener noreferrer', textContent: uiText('Install guide') }));
+    } else box.append(r.state === 'current' ? uiText('Firmware is up to date') : uiText('Razer lists no firmware updates for it'));
   };
   if (fwResult[dev.id]) show(fwResult[dev.id]);
-  else box.append(el('button', { className: 'link', textContent: 'Check for firmware update',
-    title: 'Asks apps.razer.com, the page Synapse uses. Nothing is installed.',
+  else box.append(el('button', { className: 'link', textContent: uiText('Check for firmware update'),
+    title: uiText('Asks apps.razer.com, the page Synapse uses. Nothing is installed.'),
     onclick: async e => {
-      e.target.disabled = true; e.target.textContent = 'Checking…';
+      e.target.disabled = true; e.target.textContent = uiText('Checking…');
       try { fwResult[dev.id] = await api('/api/firmware', {}); show(fwResult[dev.id]); }
-      catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = 'Check for firmware update'; }
+      catch (err) { toast(err.message, true); e.target.disabled = false; e.target.textContent = uiText('Check for firmware update'); }
     } }));
   return box;
 }
@@ -1854,18 +1911,18 @@ function firmwareCheck() {
 // ---------- Buttons ----------
 // Values are action texts, as in `secbird button`.
 const BTN_CHOICES = [
-  ['Mouse', [['left', 'Left click'], ['right', 'Right click'], ['middle', 'Middle click'], ['back', 'Back'],
-    ['forward', 'Forward'], ['double-click', 'Double click'], ['scroll-up', 'Scroll up'], ['scroll-down', 'Scroll down'],
-    ['scroll-left', 'Scroll left'], ['scroll-right', 'Scroll right']]],
-  ['Keyboard', [['key', 'Key or shortcut…'], ['turbo-key', 'Turbo key…']]],
-  ['Turbo', [['turbo-left', 'Turbo left click'], ['turbo-right', 'Turbo right click']]],
-  ['Sensitivity', [['dpi-up', 'DPI up'], ['dpi-down', 'DPI down'], ['dpi-cycle-up', 'DPI cycle'],
-    ['dpi-cycle-down', 'DPI cycle down'], ['dpi-clutch', 'Sniper (DPI while held)…']]],
-  ['Media', [['media:volume-up', 'Volume up'], ['media:volume-down', 'Volume down'], ['media:mute', 'Mute'],
-    ['media:play-pause', 'Play / pause'], ['media:next-track', 'Next track'], ['media:previous-track', 'Previous track']]],
-  ['Macro', [['macro', 'Play a macro…']]],
-  ['Other', [['hypershift', 'HyperShift (hold)'], ['profile-cycle-up', 'Next on-board profile'],
-    ['scroll-mode:1', 'Switch wheel free-spin'], ['disabled', 'Disabled']]],
+  [uiText('Mouse'), [['left', uiText('Left click')], ['right', uiText('Right click')], ['middle', uiText('Middle click')], ['back', uiText('Back')],
+    ['forward', uiText('Forward')], ['double-click', uiText('Double click')], ['scroll-up', uiText('Scroll up')], ['scroll-down', uiText('Scroll down')],
+    ['scroll-left', uiText('Scroll left')], ['scroll-right', uiText('Scroll right')]]],
+  [uiText('Keyboard'), [['key', uiText('Key or shortcut…')], ['turbo-key', uiText('Turbo key…')]]],
+  [uiText('Turbo'), [['turbo-left', uiText('Turbo left click')], ['turbo-right', uiText('Turbo right click')]]],
+  [uiText('Sensitivity'), [['dpi-up', uiText('DPI up')], ['dpi-down', uiText('DPI down')], ['dpi-cycle-up', uiText('DPI cycle')],
+    ['dpi-cycle-down', uiText('DPI cycle down')], ['dpi-clutch', uiText('Sniper (DPI while held)…')]]],
+  [uiText('Media'), [['media:volume-up', uiText('Volume up')], ['media:volume-down', uiText('Volume down')], ['media:mute', uiText('Mute')],
+    ['media:play-pause', uiText('Play / pause')], ['media:next-track', uiText('Next track')], ['media:previous-track', uiText('Previous track')]]],
+  [uiText('Macro'), [['macro', uiText('Play a macro…')]]],
+  [uiText('Other'), [['hypershift', uiText('HyperShift (hold)')], ['profile-cycle-up', uiText('Next on-board profile')],
+    ['scroll-mode:1', uiText('Switch wheel free-spin')], ['disabled', uiText('Disabled')]]],
 ];
 const CHOICE_LABEL = Object.fromEntries(BTN_CHOICES.flatMap(g => g[1]));
 const KEY_CODES = { Enter: 'enter', Escape: 'esc', Backspace: 'backspace', Tab: 'tab', Space: 'space', Minus: 'minus',
@@ -1881,8 +1938,8 @@ const keyName = code => KEY_CODES[code] || (/^Key[A-Z]$/.test(code) && code.slic
   || (/^Digit\d$/.test(code) && code.slice(5)) || (/^Numpad\d$/.test(code) && 'num' + code.slice(6)) || (/^F\d{1,2}$/.test(code) && code.toLowerCase()) || null;
 const NUM_SIGNS = { slash: '/', star: '*', minus: '-', plus: '+', enter: 'Enter', period: '.' };
 const keyLabel = k => k.length === 1 ? k.toUpperCase()
-  : /^num(\d)$/.test(k) ? 'Num ' + k.slice(3)
-  : /^num-/.test(k) ? 'Num ' + NUM_SIGNS[k.slice(4)]
+  : /^num(\d)$/.test(k) ? uiText('Num ') + k.slice(3)
+  : /^num-/.test(k) ? uiText('Num ') + NUM_SIGNS[k.slice(4)]
   : k.charAt(0).toUpperCase() + k.slice(1);
 const combo = c => c.split('+').map(keyLabel).join('+');
 const MODIFIER_ORDER = ['ctrl', 'shift', 'alt', 'win', 'rctrl', 'rshift', 'ralt', 'rwin'];
@@ -1909,17 +1966,17 @@ function joinAction(choice, keys, n) {
 function actionLabel(a) {
   if (!a) return '';
   let m;
-  if ((m = /^key:(.+)$/.exec(a))) return 'Key ' + combo(m[1]);
-  if ((m = /^turbo:key:(.+)@(\d+)$/.exec(a))) return `Turbo key ${combo(m[1])} · ${m[2]}/s`;
-  if ((m = /^turbo:(.+)@(\d+)$/.exec(a))) return `Turbo ${(CHOICE_LABEL[m[1]] || m[1].replace(/-/g, ' ')).toLowerCase()} · ${m[2]}/s`;
-  if ((m = /^dpi-clutch:(\d+)/.exec(a))) return `Sniper · ${m[1]} DPI`;
+  if ((m = /^key:(.+)$/.exec(a))) return uiText('Key ') + combo(m[1]);
+  if ((m = /^turbo:key:(.+)@(\d+)$/.exec(a))) return uiText`Turbo key ${combo(m[1])} · ${m[2]}/s`;
+  if ((m = /^turbo:(.+)@(\d+)$/.exec(a))) return uiText`Turbo ${(CHOICE_LABEL[m[1]] || m[1].replace(/-/g, ' ')).toLowerCase()} · ${m[2]}/s`;
+  if ((m = /^dpi-clutch:(\d+)/.exec(a))) return uiText`Sniper · ${m[1]} DPI`;
   if ((m = /^macro:(\d+)(?:@(\w+))?$/.exec(a))) {
     const mac = (macroData[dev.id] && macroData[dev.id].macros.find(x => x.id === +m[1]));
-    const how = { hold: ' · while held', toggle: ' · toggle' }[m[2]] || (m[2] && m[2] !== '1' ? ` · ${m[2]}×` : '');
-    return 'Macro ' + (mac ? `“${mac.name}”` : '#' + m[1]) + how;
+    const how = { hold: uiText(' · while held'), toggle: uiText(' · toggle') }[m[2]] || (m[2] && m[2] !== '1' ? ` · ${m[2]}×` : '');
+    return uiText('Macro ') + (mac ? `“${mac.name}”` : '#' + m[1]) + how;
   }
   if (CHOICE_LABEL[a]) return CHOICE_LABEL[a];
-  if ((m = /^raw:(\d+):/.exec(a))) return `Set by Synapse (function ${m[1]})`;
+  if ((m = /^raw:(\d+):/.exec(a))) return uiText`Set by Synapse (function ${m[1]})`;
   return a.replace(/[-:]/g, ' ').replace(/^./, c => c.toUpperCase());
 }
 
@@ -1937,26 +1994,26 @@ async function loadButtons(d, force) {
 function buttonEditor(box, name) {
   const b = (btnData[dev.id] || []).find(x => x.name === name); if (!b) return;
   const action = b[btnLayer], [choice, keys, n] = splitAction(action);
-  const sel = el('select', { ariaLabel: b.label + ' action', id: 'btnSel' });
+  const sel = el('select', { ariaLabel: b.label + uiText(' action'), id: 'btnSel' });
   let found = false;
   BTN_CHOICES.forEach(([group, opts]) => {
-    if (isBoard() && group === 'Sensitivity') return; // a keyboard has no DPI
+    if (isBoard() && group === uiText('Sensitivity')) return; // a keyboard has no DPI
     const g = el('optgroup', { label: group });
     opts.filter(([v]) => !(isBoard() && v === 'scroll-mode:1'))
       .forEach(([v, t]) => { g.append(new Option(t, v, false, v === choice)); found ||= v === choice; });
     sel.append(g);
   });
-  if (!found) sel.prepend(new Option(actionLabel(action) + ' (as saved)', action, false, true)); // only Synapse sets these
-  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: 'Press keys…', ariaLabel: 'Key for ' + b.label });
+  if (!found) sel.prepend(new Option(actionLabel(action) + uiText(' (as saved)'), action, false, true)); // only Synapse sets these
+  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: uiText('Press keys…'), ariaLabel: uiText('Key for ') + b.label });
   keyIn.dataset.keys = keys;
   const numIn = el('input', { type: 'number', className: 'num', value: n });
   const numLabel = el('span', { className: 'val' });
   // Which macro, and how it plays: once, N times, while held, toggle.
   const macros = (macroData[dev.id] && macroData[dev.id].macros) || [];
-  const macroSel = el('select', { ariaLabel: 'Macro for ' + b.label });
+  const macroSel = el('select', { ariaLabel: uiText('Macro for ') + b.label });
   macros.forEach(mc => macroSel.append(new Option(mc.name, mc.id, false, choice === 'macro' && String(mc.id) === keys)));
-  const playSel = el('select', { ariaLabel: 'How the macro plays' });
-  [['1', 'Once'], ['times', 'Several times'], ['hold', 'While held'], ['toggle', 'Toggle on / off']].forEach(([v, t]) =>
+  const playSel = el('select', { ariaLabel: uiText('How the macro plays') });
+  [['1', uiText('Once')], ['times', uiText('Several times')], ['hold', uiText('While held')], ['toggle', uiText('Toggle on / off')]].forEach(([v, t]) =>
     playSel.append(new Option(t, v, false, choice === 'macro' && (v === n || (v === 'times' && /^\d+$/.test(n) && n !== '1')))));
   const macroArgs = () => {
     const play = playSel.value === 'times' ? String(Math.max(2, Math.min(255, +numIn.value || 2))) : playSel.value;
@@ -1968,14 +2025,14 @@ function buttonEditor(box, name) {
   };
   // Modifier toggles: Windows keeps some shortcuts (Win+D, Win+L, Alt+Tab) and the page never
   // sees the key, so press the key and then click the modifier (#25).
-  const modBox = el('div', { className: 'seg mods', role: 'group', ariaLabel: 'Modifiers' });
+  const modBox = el('div', { className: 'seg mods', role: 'group', ariaLabel: uiText('Modifiers') });
   const setKeys = keys => {
     keyIn.dataset.keys = keys; keyIn.value = combo(keys);
     const parts = keys.split('+');
     modBox.querySelectorAll('button[data-m]').forEach(t => t.ariaPressed = parts.includes(t.dataset.m));
   };
   ['ctrl', 'shift', 'alt', 'win'].forEach(m => modBox.append(el('button', { textContent: keyLabel(m), ariaPressed: false, dataset: { m },
-    title: 'Add or remove ' + keyLabel(m) + '. For shortcuts Windows keeps for itself, like Win+D: press the key, then click this.',
+    title: uiText('Add or remove ') + keyLabel(m) + uiText('. For shortcuts Windows keeps for itself, like Win+D: press the key, then click this.'),
     onclick: () => {
       const parts = keyIn.dataset.keys ? keyIn.dataset.keys.split('+') : [];
       const on = new Set(parts.filter(p => MODIFIER_ORDER.includes(p)));
@@ -1985,7 +2042,7 @@ function buttonEditor(box, name) {
     } })));
   // Tab moves focus out of the box, and Windows keeps Alt+Tab, so Tab gets its own button:
   // click it, then a modifier, for Alt+Tab or Ctrl+Tab (#51).
-  modBox.append(el('button', { textContent: 'Tab', title: 'Use Tab as the key. For Alt+Tab, click this, then Alt.',
+  modBox.append(el('button', { textContent: 'Tab', title: uiText('Use Tab as the key. For Alt+Tab, click this, then Alt.'),
     onclick: () => {
       const mods = (keyIn.dataset.keys || '').split('+').filter(p => MODIFIER_ORDER.includes(p));
       setKeys([...mods, 'tab'].join('+')); send(); keyIn.focus();
@@ -2008,16 +2065,16 @@ function buttonEditor(box, name) {
     keyIn.hidden = modBox.hidden = !(v === 'key' || v === 'turbo-key');
     macroSel.hidden = playSel.hidden = !mac;
     numIn.hidden = numLabel.hidden = !(turbo || clutch || times);
-    Object.assign(numIn, clutch ? { min: 100, max: dev.dpi ? dev.dpi.max : 30000, step: 50, ariaLabel: 'DPI while held' }
-      : times ? { min: 2, max: 255, step: 1, ariaLabel: 'Times to play' } : { min: 1, max: 50, step: 1, ariaLabel: 'Presses per second' });
-    numLabel.textContent = clutch ? 'DPI while held' : times ? 'times' : 'presses / second';
+    Object.assign(numIn, clutch ? { min: 100, max: dev.dpi ? dev.dpi.max : 30000, step: 50, ariaLabel: uiText('DPI while held') }
+      : times ? { min: 2, max: 255, step: 1, ariaLabel: uiText('Times to play') } : { min: 1, max: 50, step: 1, ariaLabel: uiText('Presses per second') });
+    numLabel.textContent = clutch ? uiText('DPI while held') : times ? 'times' : uiText('presses / second');
     if (times && /^\d+$/.test(n) && +n > 1 && !numIn.dataset.touched) numIn.value = n;
     if (!numIn.value || (clutch && +numIn.value < 100) || (turbo && +numIn.value > 50)) numIn.value = clutch ? 400 : times ? 2 : 7;
   };
   sel.onchange = () => {
     extras();
-    if (sel.value === 'key' || sel.value === 'turbo-key') { setKeys(''); keyIn.focus(); return toast('Now press the key or shortcut'); }
-    if (sel.value === 'macro' && !macros.length) return toast('Make a macro first, in the Macros section', true);
+    if (sel.value === 'key' || sel.value === 'turbo-key') { setKeys(''); keyIn.focus(); return toast(uiText('Now press the key or shortcut')); }
+    if (sel.value === 'macro' && !macros.length) return toast(uiText('Make a macro first, in the Macros section'), true);
     send();
   };
   numIn.onchange = () => { numIn.dataset.touched = '1'; send(); };
@@ -2026,10 +2083,10 @@ function buttonEditor(box, name) {
   extras();
   const saved = b.saved && b.saved[btnLayer];
   box.append(el('div', { className: 'edgroup' },
-    el('h3', { textContent: 'What it does' + (btnLayer === 'hypershift' ? ' while HyperShift is held' : '') }),
+    el('h3', { textContent: uiText('What it does') + (btnLayer === 'hypershift' ? uiText(' while HyperShift is held') : '') }),
     el('div', { className: 'row' }, sel, keyIn, modBox, macroSel, playSel, numIn, numLabel)));
-  if (b.remapped[btnLayer]) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Stored on the ' + holder() }),
-    el('div', { className: 'row' }, el('span', { textContent: actionLabel(saved) || 'Unknown' }), el('button', { className: 'ghost', textContent: 'Restore', title: 'Put back what the ' + holder() + ' stores', onclick: () => assign(b.name, '') }))));
+  if (b.remapped[btnLayer]) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText`Stored on the ${holder()}` }),
+    el('div', { className: 'row' }, el('span', { textContent: actionLabel(saved) || uiText('Unknown') }), el('button', { className: 'ghost', textContent: uiText('Restore'), title: uiText`Put back what the ${holder()} stores`, onclick: () => assign(b.name, '') }))));
 }
 
 async function loadMacros(d) {
@@ -2041,22 +2098,22 @@ async function loadMacros(d) {
 
 function macrosEditor(box) {
   const data = macroData[dev.id];
-  if (!data) return box.append(el('p', { className: 'hint', textContent: 'Reading the macros from the device…' }));
-  const list = el('div', { className: 'edgroup' }, el('h3', { textContent: 'On this device' }));
-  if (!data.macros.length) list.append(el('p', { className: 'note', textContent: 'No macros yet.' }));
+  if (!data) return box.append(el('p', { className: 'hint', textContent: uiText('Reading the macros from the device…') }));
+  const list = el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('On this device') }));
+  if (!data.macros.length) list.append(el('p', { className: 'note', textContent: uiText('No macros yet.') }));
   data.macros.forEach(mc => list.append(el('div', { className: 'macro' },
     el('div', { className: 'row' }, el('b', { textContent: mc.name }),
-      el('button', { className: 'ghost', innerHTML: icon('x') + 'Delete', ariaLabel: 'Delete ' + mc.name, onclick: () => macroCall({ action: 'delete', macro_id: mc.id }, 'Deleted ' + mc.name) })),
+      el('button', { className: 'ghost', innerHTML: icon('x') + uiText('Delete'), ariaLabel: uiText('Delete ') + mc.name, onclick: () => macroCall({ action: 'delete', macro_id: mc.id }, uiText('Deleted ') + mc.name) })),
     el('code', { textContent: mc.steps || mc.error || '' }))));
-  list.append(el('p', { className: 'note', textContent: `${Math.round(data.free / 1024)} KB free of ${Math.round(data.max / 1024)} KB` +
-    (data.recyclable ? ` (${Math.round(data.recyclable / 1024)} KB from deleted macros isn't reusable yet)` : '') }));
+  list.append(el('p', { className: 'note', textContent: uiText`${Math.round(data.free / 1024)} KB free of ${Math.round(data.max / 1024)} KB` +
+    (data.recyclable ? uiText` (${Math.round(data.recyclable / 1024)} KB from deleted macros isn't reusable yet)` : '') }));
 
-  const name = el('input', { type: 'text', placeholder: 'Name, e.g. Build order', maxLength: 60, ariaLabel: 'Macro name' });
-  const steps = el('textarea', { rows: 3, placeholder: 'tap:ctrl+c wait:50 click:left', ariaLabel: 'Macro steps', spellcheck: false });
-  const rec = el('button', { className: 'ghost', textContent: 'Record' });
-  const save = el('button', { className: 'ghost', textContent: 'Save to device', onclick: () => {
-    if (!name.value.trim() || !steps.value.trim()) return toast('Give the macro a name and some steps', true);
-    macroCall({ action: 'new', name: name.value.trim(), script: steps.value.trim() }, 'Saved ' + name.value.trim());
+  const name = el('input', { type: 'text', placeholder: uiText('Name, e.g. Build order'), maxLength: 60, ariaLabel: uiText('Macro name') });
+  const steps = el('textarea', { rows: 3, placeholder: 'tap:ctrl+c wait:50 click:left', ariaLabel: uiText('Macro steps'), spellcheck: false });
+  const rec = el('button', { className: 'ghost', textContent: uiText('Record') });
+  const save = el('button', { className: 'ghost', textContent: uiText('Save to device'), onclick: () => {
+    if (!name.value.trim() || !steps.value.trim()) return toast(uiText('Give the macro a name and some steps'), true);
+    macroCall({ action: 'new', name: name.value.trim(), script: steps.value.trim() }, uiText('Saved ') + name.value.trim());
   } });
   // Recording: keys pressed and mouse buttons clicked on the steps box, with the real gaps.
   let recording = false, last = 0, out = [];
@@ -2077,13 +2134,13 @@ function macrosEditor(box) {
   steps.addEventListener('contextmenu', e => { if (recording) e.preventDefault(); });
   rec.onclick = () => {
     recording = !recording;
-    rec.textContent = recording ? 'Stop recording' : 'Record';
-    if (recording) { out = []; last = 0; steps.value = ''; steps.focus(); toast('Recording: type and click in the box, then press Stop'); }
+    rec.textContent = recording ? uiText('Stop recording') : uiText('Record');
+    if (recording) { out = []; last = 0; steps.value = ''; steps.focus(); toast(uiText('Recording: type and click in the box, then press Stop')); }
     else steps.value = steps.value.replace(/(^| )down:(\S+) up:\2(?= |$)/g, '$1tap:$2'); // tidy plain key taps
   };
-  box.append(list, el('div', { className: 'edgroup' }, el('h3', { textContent: 'New macro' }), name, steps,
+  box.append(list, el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('New macro') }), name, steps,
     el('div', { className: 'row' }, rec, save)),
-    el('p', { className: 'note', textContent: 'Steps: tap:<key or ctrl+c>, down:<key>, up:<key>, wait:<ms>, click:<left|right|middle|back|forward>, press:/release:<button>, wheel:up|down. Then pick it for a button in Buttons.' }));
+    el('p', { className: 'note', textContent: uiText('Steps: tap:<key or ctrl+c>, down:<key>, up:<key>, wait:<ms>, click:<left|right|middle|back|forward>, press:/release:<button>, wheel:up|down. Then pick it for a button in Buttons.') }));
 }
 
 async function macroCall(body, done) {
@@ -2099,7 +2156,7 @@ async function restoreAllButtons() {
     const r = await api('/api/buttons-restore', {});
     btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; dev.profile.buttons = {};
     sel = null; renderWork();
-    toast(`Every ${isBoard() ? 'key' : 'button'} is back to what the ${holder()} stores`);
+    toast(uiText`Every ${isBoard() ? uiText('key') : uiText('button')} is back to what the ${holder()} stores`);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -2115,7 +2172,7 @@ async function assign(button, action, isUndo) {
     if (action) dev.profile.buttons[skey] = action; else delete dev.profile.buttons[skey];
     if (!action) renderWork(); else refreshCell('btn:' + button);
     const undo = !isUndo && prev ? () => { btnLayer = layer; assign(button, prev.remapped ? prev.action : '', true); } : null;
-    toast(isUndo ? 'Undone' : action ? 'Saved to ' + dev.active : 'Restored what the ' + holder() + ' stores', false, undo);
+    toast(isUndo ? uiText('Undone') : action ? uiText('Saved to ') + dev.active : uiText`Restored what the ${holder()} stores`, false, undo);
   } catch (err) { toast(err.message, true); renderWork(); }
 }
 
@@ -2161,16 +2218,46 @@ async function copyToZones(src) {
   lastZone[dev.id] = src;
   const name = what.color ? '#' + what.color : effectLabel(what.effect);
   const all = skipped.length === dev.leds.length - 1;
-  toast(name + (all ? ' stays on ' + label(src) + ': the other zones can’t run it' : ' on all zones' + (skipped.length ? '. ' + skipped.join(', ') + ' can’t run it' : '')), all);
+  toast(name + (all ? uiText(' stays on ') + label(src) + uiText(': the other zones can’t run it') : uiText(' on all zones') + (skipped.length ? '. ' + skipped.join(', ') + uiText(' can’t run it') : '')), all);
 }
 const sendBright = live(([name, value]) => api('/api/brightness', { zone: name, value }));
-const sendDpi = live(v => api('/api/dpi', { x: v, y: v }).then(r => { dev.dpi.x = dev.dpi.y = r.dpi[0]; dev.profile.dpi = r.dpi; refreshCell('dpi'); }));
-function setDpi(v) {
-  v = Math.round(Number(v)); if (!v) return;
-  const n = $('dpiNum'), s = $('dpiSlider');
-  if (n) n.value = v; if (s) s.value = v;
-  document.querySelectorAll('#dpiPills .pill').forEach(p => p.ariaPressed = +p.textContent === v);
-  sendDpi(v);
+const dpiSenders = new WeakMap();
+function setDpi(value, axis) {
+  const target = dev, profile = target.profile;
+  const previous = [target.dpi.x, target.dpi.y];
+  const pair = dpiPair(previous, value, axis, dpiLinked.get(target.id) === true, target.dpi);
+  if (!pair) return false;
+  // Keep pending edits to the other axis when moving between controls quickly.
+  target.dpi.x = pair[0]; target.dpi.y = pair[1];
+  showDpi();
+  let state = dpiSenders.get(target);
+  if (!state) {
+    state = { revision: 0, confirmed: previous, pending: false };
+    state.send = live(async ({ pair, revision, profile }) => {
+      let r;
+      try { r = await api('/api/dpi', { id: target.id, x: pair[0], y: pair[1] }); }
+      catch (error) {
+        if (revision === state.revision) {
+          target.dpi.x = state.confirmed[0]; target.dpi.y = state.confirmed[1];
+          profile.dpi = state.confirmed;
+          state.pending = false;
+          if (dev === target) showDpi();
+        }
+        throw error;
+      }
+      state.confirmed = r.dpi;
+      if (revision === state.revision) {
+        target.dpi.x = r.dpi[0]; target.dpi.y = r.dpi[1]; profile.dpi = r.dpi;
+        state.pending = false;
+        if (dev === target) showDpi();
+      }
+    }, () => dev === target ? uiText('Saved to ') + target.active : null);
+    dpiSenders.set(target, state);
+  }
+  if (!state.pending) state.confirmed = previous;
+  state.pending = true;
+  state.send({ pair, revision: ++state.revision, profile });
+  return true;
 }
 
 // Colors on the keys: painted keys, else the whole-keyboard color, else off.
@@ -2224,7 +2311,7 @@ async function activate(name, quiet) {
     if (dev.kind === 'mouse') btnData[dev.id] = undefined; // the new profile's remaps; read again when shown
     if (!quiet) sel = null;
     render();
-    toast(r.failures.length ? 'Some settings failed: ' + r.failures.join('; ') : (quiet ? 'Switched to ' + name + ' to edit it' : name + ' is active'), r.failures.length > 0);
+    toast(r.failures.length ? uiText('Some settings failed: ') + r.failures.join('; ') : (quiet ? uiText('Switched to ') + name + uiText(' to edit it') : name + uiText(' is active')), r.failures.length > 0);
     return true;
   } catch (err) { toast(err.message, true); render(); return false; }
 }
@@ -2232,17 +2319,17 @@ async function createProfile(name) {
   try {
     await api('/api/profile', { action: 'new', name });
     await activate(name, true);
-    toast('Created ' + name + ' (a copy of the previous profile)');
+    toast(uiText('Created ') + name + uiText(' (a copy of the previous profile)'));
   } catch (err) { toast(err.message, true); }
 }
 async function deleteProfile(name) {
   const other = name === dev.active ? dev.profiles.find(p => p !== name) : null;
-  if (!confirm(`Delete the profile "${name}"?` + (other ? ` "${other}" becomes active.` : ' Games tied to it go back to the active profile.'))) return;
+  if (!confirm(uiText`Delete the profile "${name}"?` + (other ? uiText` "${other}" becomes active.` : uiText(' Games tied to it go back to the active profile.')))) return;
   try {
     if (other) await api('/api/profile', { action: 'use', name: other });
     const r = await api('/api/profile', { action: 'delete', name }); adopt(r.device);
     if (other && dev.kind === 'mouse') btnData[dev.id] = undefined;
-    sel = null; render(); toast('Deleted ' + name);
+    sel = null; render(); toast(uiText('Deleted ') + name);
   } catch (err) { toast(err.message, true); }
 }
 async function saveApps(name, apps, msg) {
@@ -2262,7 +2349,7 @@ let showSettings = false, appSettings = null;
 function renderSettings() {
   const box = $('settings');
   if (!appSettings) {
-    box.replaceChildren(el('p', { className: 'empty', textContent: 'Reading the settings…' }));
+    box.replaceChildren(el('p', { className: 'empty', textContent: uiText('Reading the settings…') }));
     api('/api/settings').then(r => { appSettings = r; if (showSettings) renderSettings(); }).catch(e => toast(e.message, true));
     return;
   }
@@ -2280,7 +2367,7 @@ function renderSettings() {
   // A switch the tray keeps: sent, then the page shows what the tray says.
   const traySwitch = (key, label) => toggle(label, !!a[key], async (on, input) => {
     input.disabled = true;
-    try { appSettings = await api('/api/settings', { key, on }); toast(label + (on ? ' on' : ' off')); }
+    try { appSettings = await api('/api/settings', { key, on }); toast(label + (on ? uiText(' enabled') : uiText(' disabled'))); }
     catch (e) { toast(e.message, true); input.checked = !on; }
     input.disabled = false;
   });
@@ -2292,24 +2379,37 @@ function renderSettings() {
 
   // Editor
   const themeSel = $('theme').cloneNode(true);
-  themeSel.id = ''; themeSel.value = $('theme').value; themeSel.ariaLabel = 'Theme';
+  themeSel.id = ''; themeSel.value = $('theme').value; themeSel.ariaLabel = uiText('Theme');
   themeSel.onchange = e => { $('theme').value = e.target.value; $('theme').dispatchEvent(new Event('change')); };
-  const editor = group('Editor',
-    row('Theme', 'Auto follows Windows: Bridge when dark, Light when light.', themeSel),
-    row('Motion', 'Less motion stops slides and fades in the editor, whatever Windows is set to.',
-      seg('Motion', [['', 'Like Windows'], ['reduce', 'Less motion']], remembered('motion') === 'reduce' ? 'reduce' : '', v => {
+  const languageSelect = el('select', { ariaLabel: uiText('Language'), onchange: async e => {
+    const select = e.target;
+    select.disabled = true;
+    try {
+      await api('/api/settings', { key: 'editor_language', data: select.value });
+      location.reload();
+    } catch (error) {
+      toast(error.message, true); select.value = languagePreference; select.disabled = false;
+    }
+  } });
+  [['auto', uiText('System language')], ['en', 'English'], ['zh-CN', '简体中文']].forEach(([value, text]) =>
+    languageSelect.append(el('option', { value, textContent: text, selected: value === languagePreference })));
+  const editor = group(uiText('Editor'),
+    row(uiText('Language'), uiText('Choose the editor language. Changing it reloads this page.'), languageSelect),
+    row(uiText('Theme'), uiText('Auto follows Windows: Bridge when dark, Light when light.'), themeSel),
+    row(uiText('Motion'), uiText('Less motion stops slides and fades in the editor, whatever Windows is set to.'),
+      seg(uiText('Motion'), [['', uiText('Like Windows')], ['reduce', uiText('Less motion')]], remembered('motion') === 'reduce' ? 'reduce' : '', v => {
         remember('motion', v); if (v) document.documentElement.dataset.motion = v; else delete document.documentElement.dataset.motion; renderSettings();
       })));
 
   // Startup and games
-  const startup = group('Startup and games',
-    row('Start with Windows', 'Your settings go back on as soon as you sign in. Off means they only apply while Secretarybird is running.', ...traySwitch('autostart', 'Start with Windows')),
-    row('Switch profiles with games', 'A profile tied to a program comes up while that program is in front, and goes back after.', ...traySwitch('auto_switch', 'Switch profiles with games')),
-    row('Lights when away', 'While the PC is locked or its screen is off, the lights dim to a quarter or turn off, and come back when you return. Nothing is saved on the devices.',
-      seg('Lights when away', [['', 'Leave on'], ['dim', 'Dim'], ['off', 'Off']], a.away_lights || '', async v => {
+  const startup = group(uiText('Startup and games'),
+    row(uiText('Start with Windows'), uiText('Your settings go back on as soon as you sign in. Off means they only apply while Secretarybird is running.'), ...traySwitch('autostart', uiText('Start with Windows'))),
+    row(uiText('Switch profiles with games'), uiText('A profile tied to a program comes up while that program is in front, and goes back after.'), ...traySwitch('auto_switch', uiText('Switch profiles with games'))),
+    row(uiText('Lights when away'), uiText('While the PC is locked or its screen is off, the lights dim to a quarter or turn off, and come back when you return. Nothing is saved on the devices.'),
+      seg(uiText('Lights when away'), [['', uiText('Leave on')], ['dim', uiText('Dim')], ['off', uiText('Off')]], a.away_lights || '', async v => {
         try {
           appSettings = await api('/api/settings', { key: 'away_lights', data: v });
-          toast(v === 'dim' ? 'Lights dim when away' : v === 'off' ? 'Lights turn off when away' : 'Lights stay on when away');
+          toast(v === 'dim' ? uiText('Lights dim when away') : v === 'off' ? uiText('Lights turn off when away') : uiText('Lights stay on when away'));
           renderSettings();
         } catch (e) { toast(e.message, true); }
       })));
@@ -2318,17 +2418,17 @@ function renderSettings() {
   // Any whole percent: typed (saved on Enter or leaving the box) or stepped with - and +
   // (saved once the clicking stops). Out of range goes back to the saved level.
   const batteryLevel = () => {
-    const input = el('input', { type: 'number', className: 'num pct', min: 1, max: 95, step: 1, value: a.battery_warning_at, ariaLabel: 'Warn at percent' });
-    const minus = el('button', { type: 'button', textContent: '−', ariaLabel: 'Lower' });
-    const plus = el('button', { type: 'button', textContent: '+', ariaLabel: 'Higher' });
+    const input = el('input', { type: 'number', className: 'num pct', min: 1, max: 95, step: 1, value: a.battery_warning_at, ariaLabel: uiText('Warn at percent') });
+    const minus = el('button', { type: 'button', textContent: '−', ariaLabel: uiText('Lower') });
+    const plus = el('button', { type: 'button', textContent: '+', ariaLabel: uiText('Higher') });
     const ends = () => { minus.disabled = Number(input.value) <= 1; plus.disabled = Number(input.value) >= 95; };
     let timer = 0;
     const save = async () => {
       clearTimeout(timer);
       const v = Number(input.value);
       if (v === a.battery_warning_at) return;
-      if (!Number.isInteger(v) || v < 1 || v > 95) { input.value = a.battery_warning_at; ends(); return toast('Pick a level from 1% to 95%', true); }
-      try { appSettings = await api('/api/settings', { key: 'battery_warning_at', value: v }); toast('Low battery warning at ' + v + '%'); renderSettings(); }
+      if (!Number.isInteger(v) || v < 1 || v > 95) { input.value = a.battery_warning_at; ends(); return toast(uiText('Pick a level from 1% to 95%'), true); }
+      try { appSettings = await api('/api/settings', { key: 'battery_warning_at', value: v }); toast(uiText('Low battery warning at ') + v + '%'); renderSettings(); }
       catch (e) { input.value = a.battery_warning_at; ends(); toast(e.message, true); }
     };
     const step = by => {
@@ -2344,18 +2444,18 @@ function renderSettings() {
     return el('span', { className: 'pct-box' }, minus, input, el('span', { className: 'unit', textContent: '%' }), plus);
   };
   const checkOut = el('span', { className: 'out' });
-  const checkBtn = el('button', { className: 'ghost', textContent: 'Check now', onclick: async () => {
-    checkBtn.disabled = true; checkOut.textContent = 'Checking…';
+  const checkBtn = el('button', { className: 'ghost', textContent: uiText('Check now'), onclick: async () => {
+    checkBtn.disabled = true; checkOut.textContent = uiText('Checking…');
     try {
       const r = await api('/api/update-check', {});
-      if (!r.latest) checkOut.replaceChildren('You’re up to date');
+      if (!r.latest) checkOut.replaceChildren(uiText('You’re up to date'));
       else {
-        const link = el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Secretarybird ' + r.latest + ' is out' });
-        const go = el('button', { className: 'ghost', textContent: 'Update now', onclick: async () => {
+        const link = el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Secretarybird ' + r.latest + uiText(' is out') });
+        const go = el('button', { className: 'ghost', textContent: uiText('Update now'), onclick: async () => {
           go.disabled = true;
           try {
             await api('/api/update-install', {});
-            checkOut.replaceChildren('Updating to ' + r.latest + '. Secretarybird restarts in a few seconds; open the editor again from the tray.');
+            checkOut.replaceChildren(uiText('Updating to ') + r.latest + uiText('. Secretarybird restarts in a few seconds; open the editor again from the tray.'));
           } catch (e) { go.disabled = false; toast(e.message, true); }
         } });
         checkOut.replaceChildren(link, ...(r.installed ? [' ', go] : []));
@@ -2363,13 +2463,13 @@ function renderSettings() {
     } catch (e) { checkOut.textContent = ''; toast(e.message, true); }
     checkBtn.disabled = false;
   } });
-  const notes = group('Notifications and checks',
-    row('DPI and profile popups', 'A small popup above the clock when DPI, the on-board profile or a game profile changes.', ...traySwitch('popups', 'DPI and profile popups')),
-    row('Low battery warning', 'A notification when a wireless device drops to ' + a.battery_warning_at + '%.',
+  const notes = group(uiText('Notifications and checks'),
+    row(uiText('DPI and profile popups'), uiText('A small popup above the clock when DPI, the on-board profile or a game profile changes.'), ...traySwitch('popups', uiText('DPI and profile popups'))),
+    row(uiText('Low battery warning'), uiText('A notification when a wireless device drops to ') + a.battery_warning_at + '%.',
       batteryLevel(),
-      ...traySwitch('battery_warning', 'Low battery warning')),
-    row('New version notices', 'Once a day, asks GitHub whether a newer Secretarybird is out. Nothing else is sent.', checkOut, checkBtn, ...traySwitch('updates', 'New version notices')),
-    row('Weekly firmware check', 'Once a week, asks Razer’s website whether newer firmware is out for your devices. It never installs anything.', ...traySwitch('firmware_weekly', 'Weekly firmware check')));
+      ...traySwitch('battery_warning', uiText('Low battery warning'))),
+    row(uiText('New version notices'), uiText('Once a day, asks GitHub whether a newer Secretarybird is out. Nothing else is sent.'), checkOut, checkBtn, ...traySwitch('updates', uiText('New version notices'))),
+    row(uiText('Weekly firmware check'), uiText('Once a week, asks Razer’s website whether newer firmware is out for your devices. It never installs anything.'), ...traySwitch('firmware_weekly', uiText('Weekly firmware check'))));
 
   // Profiles and backup
   const file = el('input', { type: 'file', accept: '.json,application/json', hidden: true, onchange: async e => {
@@ -2378,12 +2478,12 @@ function renderSettings() {
       const r = await api('/api/import', { data: JSON.parse(await f.text()) });
       devices = r.state.devices; devices.forEach(d => { d.profile = d.profile || {}; d.profilesData = d.profilesData || {}; d.profilesData[d.active] = d.profile; });
       dev = devices.find(d => dev && d.id === dev.id) || devices[0] || null;
-      toast(r.added ? 'Added ' + plural(r.added, 'profile') + '; yours were kept. Pick one in the profile list.' : 'Nothing new in that file');
-    } catch (err) { toast(err instanceof SyntaxError ? 'That file isn’t a Secretarybird backup' : err.message, true); }
+      toast(r.added ? uiText('Added ') + plural(r.added, 'profile') + uiText('; yours were kept. Pick one in the profile list.') : uiText('Nothing new in that file'));
+    } catch (err) { toast(err instanceof SyntaxError ? uiText('That file isn’t a Secretarybird backup') : err.message, true); }
     e.target.value = '';
   } });
-  const backup = group('Profiles and backup',
-    row('Back up profiles', 'Every profile of every device in one file.', el('button', { className: 'ghost', textContent: 'Save a backup', onclick: async () => {
+  const backup = group(uiText('Profiles and backup'),
+    row(uiText('Back up profiles'), uiText('Every profile of every device in one file.'), el('button', { className: 'ghost', textContent: uiText('Save a backup'), onclick: async () => {
       try {
         const data = await api('/api/export');
         const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -2391,40 +2491,40 @@ function renderSettings() {
         setTimeout(() => URL.revokeObjectURL(url), 5000);
       } catch (e) { toast(e.message, true); }
     } })),
-    row('Restore from a backup', 'Adds the profiles in a backup file. Yours are kept; a clashing name gets “(imported)”.', file,
-      el('button', { className: 'ghost', textContent: 'Choose a file…', onclick: () => file.click() })),
-    row('Settings folder', a.folder, el('button', { className: 'ghost', textContent: 'Open', onclick: () => api('/api/open-folder', {}).catch(e => toast(e.message, true)) })));
+    row(uiText('Restore from a backup'), uiText('Adds the profiles in a backup file. Yours are kept; a clashing name gets “(imported)”.'), file,
+      el('button', { className: 'ghost', textContent: uiText('Choose a file…'), onclick: () => file.click() })),
+    row(uiText('Settings folder'), a.folder, el('button', { className: 'ghost', textContent: uiText('Open'), onclick: () => api('/api/open-folder', {}).catch(e => toast(e.message, true)) })));
 
   // Help
-  const reportBtn = el('button', { className: 'ghost', textContent: 'Copy report and open GitHub', onclick: async () => {
-    reportBtn.disabled = true; reportBtn.textContent = 'Reading the devices…';
+  const reportBtn = el('button', { className: 'ghost', textContent: uiText('Copy report and open GitHub'), onclick: async () => {
+    reportBtn.disabled = true; reportBtn.textContent = uiText('Reading the devices…');
     try {
       const r = await api('/api/report', {});
       await navigator.clipboard.writeText(r.text);
       window.open(a.repository + '/issues/new?template=device-report.yml', '_blank', 'noopener');
-      toast('Report copied: paste it into “Output of secbird report”');
+      toast(uiText('Report copied: paste it into “Output of secbird report”'));
     } catch (e) { toast(e.message, true); }
-    reportBtn.disabled = false; reportBtn.textContent = 'Copy report and open GitHub';
+    reportBtn.disabled = false; reportBtn.textContent = uiText('Copy report and open GitHub');
   } });
   const mice = devices.filter(d => d.kind === 'mouse');
-  const help = group('Help',
-    row('Device report', 'A read-only description of your devices for a GitHub issue, when one is missing or misbehaves. Serial numbers are shortened.', reportBtn),
-    mice.length ? row('Restore all mouse buttons', 'Every remapped button on every mouse back to what the mouse stores (factory or Synapse), and the remaps forgotten.',
-      el('button', { className: 'ghost', textContent: 'Restore all', onclick: async () => {
-        if (!confirm('Put every mouse button back to what the mouse stores?')) return;
+  const help = group(uiText('Help'),
+    row(uiText('Device report'), uiText('A read-only description of your devices for a GitHub issue, when one is missing or misbehaves. Serial numbers are shortened.'), reportBtn),
+    mice.length ? row(uiText('Restore all mouse buttons'), uiText('Every remapped button on every mouse back to what the mouse stores (factory or Synapse), and the remaps forgotten.'),
+      el('button', { className: 'ghost', textContent: uiText('Restore all'), onclick: async () => {
+        if (!confirm(uiText('Put every mouse button back to what the mouse stores?'))) return;
         try {
           const r = await api('/api/restore-all-buttons', {});
           btnData = {};
-          toast(r.results.map(x => x.error ? x.device + ': ' + x.error : x.device + ': ' + plural(x.restored, 'button') + ' restored').join(' · ') || 'No mouse with remappable buttons', r.results.some(x => x.error));
+          toast(r.results.map(x => x.error ? x.device + ': ' + x.error : x.device + ': ' + plural(x.restored, 'button') + uiText(' restored')).join(' · ') || uiText('No mouse with remappable buttons'), r.results.some(x => x.error));
           load();
         } catch (e) { toast(e.message, true); }
       } })) : null,
-    row('Razer Synapse', a.synapse.length ? 'Running (' + a.synapse.join(', ') + '). It can overwrite these settings. `secbird debloat` stops it starting with Windows.' : 'Not running. Good: nothing will overwrite your settings.'),
-    row('About', 'Secretarybird ' + a.version + '. Not affiliated with Razer. It goes online only for the daily version check and, if on, the weekly firmware check.',
+    row(uiText('Razer Synapse'), a.synapse.length ? uiText('Running (') + a.synapse.join(', ') + uiText('). It can overwrite these settings. `secbird debloat` stops it starting with Windows.') : uiText('Not running. Good: nothing will overwrite your settings.')),
+    row(uiText('About'), 'Secretarybird ' + a.version + uiText('. Not affiliated with Razer. It goes online only for the daily version check and, if on, the weekly firmware check.'),
       el('a', { href: a.repository, target: '_blank', rel: 'noopener noreferrer', textContent: 'GitHub' })));
 
   box.replaceChildren(el('div', { className: 'set-wrap' },
-    el('div', { className: 'set-head' }, el('h1', { textContent: 'Settings' }), el('p', { textContent: 'Changes apply right away. Esc goes back.' })),
+    el('div', { className: 'set-head' }, el('h1', { textContent: uiText('Settings') }), el('p', { textContent: uiText('Changes apply right away. Esc goes back.') })),
     editor, startup, notes, backup, help));
   box.scrollTop = top;
 }
@@ -2434,10 +2534,10 @@ function renderSettings() {
 function renderOverview() {
   const zones = devices.reduce((n, d) => n + d.leds.length, 0);
   $('ovSummary').textContent = [plural(devices.length, 'device'), zones && plural(zones, 'lighting zone'),
-    unsupported.length && unsupported.length + ' not controllable yet'].filter(Boolean).join(' · ');
+    unsupported.length && unsupported.length + uiText(' not controllable yet')].filter(Boolean).join(' · ');
   // One card per device, under a heading per kind; groups with no devices are left out.
   const card = d => {
-    const sub = el('div', { className: 'dsub' }, el('span', { className: 'ell', textContent: (KINDS[d.kind] || 'Device') + ' · ' + d.active }));
+    const sub = el('div', { className: 'dsub' }, el('span', { className: 'ell', textContent: (KINDS[d.kind] || uiText('Device')) + ' · ' + d.active }));
     if (d.battery != null) {
       const b = el('span', { className: 'batt num' + (d.battery < 20 ? ' low' : ''), innerHTML: '<b></b>' });
       b.firstChild.style.setProperty('--lvl', d.battery / 100); b.append(d.battery + '%'); sub.append(b);
@@ -2446,8 +2546,8 @@ function renderOverview() {
     const p = d.profile || {}, keys = p.keys, perKey = keys && keys.length;
     const colors = perKey ? [...new Set(keys.filter(k => k !== '000000'))].slice(0, 8).map(k => ({ color: k })) : d.leds.map(l => zoneOf(p, l.name));
     if (d.lighting_control) colors.forEach(z => { const i = el('i'), paint = zonePaint(z); if (paint) i.style.background = paint; else i.className = 'off'; dots.append(i); });
-    const stats = [d.dpi && ['DPI', d.dpi.x], d.polling && ['Polling', hz(d.polling.hz)], perKey && ['Lighting', 'Per-key']].filter(Boolean);
-    if (!stats.length) stats.push(['Lighting', d.lighting_control ? plural(d.leds.length, 'zone') : (d.leds.length || d.matrix ? 'Not controlled' : 'None'), 'quiet']);
+    const stats = [d.dpi && ['DPI', dpiLabel(d.dpi)], d.polling && [uiText('Polling'), hz(d.polling.hz)], perKey && [uiText('Lighting'), uiText('Per-key')]].filter(Boolean);
+    if (!stats.length) stats.push([uiText('Lighting'), d.lighting_control ? plural(d.leds.length, 'zone') : (d.leds.length || d.matrix ? uiText('Not controlled') : uiText('None')), 'quiet']);
     const foot = el('div', { className: 'dfoot' },
       el('div', { className: 'dstats num' }, ...stats.map(([label, value, quiet]) => el('div', {}, el('small', { textContent: label }), el('b', { className: quiet || '', textContent: value })))),
       dots);
@@ -2455,10 +2555,10 @@ function renderOverview() {
       el('div', { className: 'did' }, el('h3', { textContent: devLabel(d), title: devLabel(d) }), sub), foot);
   };
   const groups = [
-    ['Mice', 'mouse', d => d.kind === 'mouse'],
-    ['Keyboards and keypads', 'keyboard-tkl', d => d.kind === 'keyboard' || d.kind === 'keypad'],
-    ['Headsets', 'headset', d => d.kind === 'headset'],
-    ['Everything else', 'device', d => !['mouse', 'keyboard', 'keypad', 'headset'].includes(d.kind)],
+    [uiText('Mice'), 'mouse', d => d.kind === 'mouse'],
+    [uiText('Keyboards and keypads'), 'keyboard-tkl', d => d.kind === 'keyboard' || d.kind === 'keypad'],
+    [uiText('Headsets'), 'headset', d => d.kind === 'headset'],
+    [uiText('Everything else'), 'device', d => !['mouse', 'keyboard', 'keypad', 'headset'].includes(d.kind)],
   ];
   const box = $('ovGroups');
   box.innerHTML = '';
@@ -2468,9 +2568,9 @@ function renderOverview() {
       el('div', { className: 'ov-grid' }, ...cards));
   };
   groups.forEach(([title, art, match]) => group(title, art, devices.filter(match).map(card)));
-  group('Connected, not controllable yet', 'device', unsupported.map(u => el('div', { className: 'dcard muted' }, artTile(u),
-    el('div', { className: 'did' }, el('h3', { textContent: u.name, title: u.name }), el('div', { className: 'dsub' }, el('span', { textContent: u.pid + ' · Connected' }))),
-    el('div', { className: 'dfoot' }, el('div', { className: 'dstats' }, el('div', {}, el('small', { textContent: 'Why' }), el('b', { className: 'quiet', textContent: u.reason })))))));
+  group(uiText('Connected, not controllable yet'), 'device', unsupported.map(u => el('div', { className: 'dcard muted' }, artTile(u),
+    el('div', { className: 'did' }, el('h3', { textContent: u.name, title: u.name }), el('div', { className: 'dsub' }, el('span', { textContent: u.pid + uiText(' · Connected') }))),
+    el('div', { className: 'dfoot' }, el('div', { className: 'dstats' }, el('div', {}, el('small', { textContent: uiText('Why') }), el('b', { className: 'quiet', textContent: u.reason })))))));
 }
 
 // ---------- Live updates, loading, global actions ----------
@@ -2503,7 +2603,7 @@ async function load(path = '/api/state', body) {
     const s = body ? await api(path, body) : await api(path);
     devices = s.devices; unsupported = s.unsupported || []; synapse = s.synapse || [];
     devices.forEach(d => { d.profile = d.profile || {}; d.profilesData = d.profilesData || {}; d.profilesData[d.active] = d.profile; });
-    if (s.version) $('home').title = 'Secretarybird ' + s.version + ': all devices';
+    if (s.version) $('home').title = 'Secretarybird ' + s.version + uiText(': all devices');
     const want = new URLSearchParams(location.search).get('d');
     const wanted = d => d.pid === want || d.id === want;
     dev = devices.find(d => dev && d.id === dev.id) || devices.find(wanted) || devices[0] || null;
@@ -2523,14 +2623,14 @@ const sendSync = live(async what => {
   dev = devices.find(d => d.id === dev.id) || devices[0];
   render();
   const skipped = r.skipped || [];
-  const cant = skipped.length ? ` ${skipped.join(', ')} can’t show it.` : '';
-  if (!r.zones) throw new Error(r.failed.length ? 'Nothing synced: ' + r.failed.join('; ') : 'Nothing synced.' + cant);
-  if (r.failed.length) throw new Error('Some zones failed: ' + r.failed.join('; '));
+  const cant = skipped.length ? uiText` ${skipped.join(', ')} can’t show it.` : '';
+  if (!r.zones) throw new Error(r.failed.length ? uiText('Nothing synced: ') + r.failed.join('; ') : uiText('Nothing synced.') + cant);
+  if (r.failed.length) throw new Error(uiText('Some zones failed: ') + r.failed.join('; '));
   return r;
 }, r => {
   const skipped = r.skipped || [];
-  return (syncing.effect ? effectLabel(syncing.effect) : '#' + syncing.color) + ' on ' + plural(r.zones, 'zone') + ' across ' + plural(r.devices, 'device') +
-    (skipped.length ? `. ${skipped.join(', ')} can’t show it.` : '');
+  return (syncing.effect ? effectLabel(syncing.effect) : '#' + syncing.color) + uiText(' on ') + plural(r.zones, 'zone') + uiText(' across ') + plural(r.devices, 'device') +
+    (skipped.length ? uiText`. ${skipped.join(', ')} can’t show it.` : '');
 });
 // Theme: Auto follows Windows; a picked theme is remembered in this browser. Older builds
 // stored 'dark' or 'light' from a light/dark toggle: 'dark' now means the default (Auto).
