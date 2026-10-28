@@ -167,6 +167,26 @@ pub const KEY_IDS: Command = Command::new(0x02, 0x8F);
 /// Only newer mice have it; Synapse rotates in software on the rest.
 pub const SENSOR_ANGLE: Command = Command::new(0x0B, 0x14);
 pub const SENSOR_ANGLE_SIZE: u8 = 0x03;
+/// Scroll wheel (Synapse's `rzDevice25`). Each is `[store, value]`, size 2; store 0 is
+/// live, 1-5 the saved slots. GETs seen on a Naga V3 Pro on a Mouse Dock Pro, matching
+/// what Synapse showed.
+///
+/// Wheel mode: 0 tactile, 1 free-spin, 2 precision tactile (Synapse's "Micro Tactile").
+pub const SCROLL_MODE: Command = Command::new(0x02, 0x30);
+/// The older wheel mode command, tactile and free-spin only (OpenRazer's scroll mode).
+pub const SCROLL_MODE_OLD: Command = Command::new(0x02, 0x14);
+/// Scroll acceleration in free-spin: on/off, and its level 0-4 (Synapse's
+/// slider; 2 is medium). The Naga V3 Pro refuses 5 and up.
+pub const SCROLL_ACCELERATION: Command = Command::new(0x02, 0x16);
+pub const SCROLL_ACCELERATION_LEVEL: Command = Command::new(0x02, 0x22);
+/// Smart-Reel (Synapse's "Scroll Mode Auto Switch"): on/off, and its speed 0-4,
+/// as for acceleration.
+pub const SMART_REEL: Command = Command::new(0x02, 0x17);
+pub const SMART_REEL_LEVEL: Command = Command::new(0x02, 0x23);
+/// The wheel modes the wheel-mode button cycles through, a bit per mode (`1 << mode`):
+/// Synapse's "Scroll Wheel Mode Selected Information". All three on reads 7.
+pub const SCROLL_MODES_ENABLED: Command = Command::new(0x15, 0x0B);
+pub const SCROLL_SIZE: u8 = 0x02;
 /// Button slot 0 is live and unsaved, and wins over the saved profile slots 1-5.
 /// Verified (Basilisk V3): a remap in slot 0 took effect while slot 1 was active.
 pub const BUTTON_LIVE_SLOT: u8 = 0x00;

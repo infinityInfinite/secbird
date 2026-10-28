@@ -869,6 +869,7 @@ function sections() {
       rows: [...(list || []).filter(b => b[btnLayer] != null).map(b => ({ key: 'btn:' + b.name, label: b.label, name: b.name })),
         ...(list && list.length && !isBoard() ? [{ key: 'onboard', label: 'Saved on the mouse' }] : [])] });
   }
+  if (dev.scroll) s.push({ id: 'scroll', name: 'Scroll wheel', rows: [{ key: 'scroll', label: 'Scroll wheel' }] });
   if (dev.macros) s.push({ id: 'macros', name: 'Macros', rows: [{ key: 'macros', label: 'Macros on the device' }] });
   if (dev.game_mode != null) s.push({ id: 'gaming', name: 'Gaming', rows: [{ key: 'gaming', label: 'Gaming mode' }] });
   const power = [];
@@ -902,6 +903,7 @@ function railSummary(s) {
     return n ? plural(n, isBoard() ? 'key' : 'button') + ' changed' : 'As saved in the ' + holder();
   }
   if (s.id === 'gaming') return gamingText(dev.game_mode);
+  if (s.id === 'scroll') return scrollText(dev.scroll);
   if (s.id === 'macros') { const m = macroData[dev.id]; return m ? (m.macros.length ? plural(m.macros.length, 'macro') : 'None yet') : 'On the device'; }
   if (s.id === 'power') {
     const sl = dev.sleep;
@@ -1251,6 +1253,7 @@ function cellValue(key, name) {
   if (key === 'sleep') { const sl = sleepOf(name); return sl ? sl.auto + ':' + sl.minutes : ''; }
   if (key === 'dimming') return dimmingOf(name) || '';
   if (key === 'gaming') return gamingOf(name) || '';
+  if (key === 'scroll') return JSON.stringify(scrollOf(name) || '');
   if (key === 'macros' || key === 'onboard') return 'shared'; // the device's, the same in every profile
   if (key.startsWith('btn:')) {
     const b = (btnData[dev.id] || []).find(x => x.name === key.slice(4)); if (!b) return '';
@@ -1304,6 +1307,10 @@ function cellView(key, name) {
   if (key === 'dimming') {
     const d = dimmingOf(name);
     return [d ? DIMMING[d] : '<span class="unset">Not set</span>'];
+  }
+  if (key === 'scroll') {
+    const w = scrollOf(name);
+    return [w ? scrollText(w) : '<span class="unset">Not set</span>'];
   }
   if (key === 'gaming') {
     const g = gamingOf(name);
@@ -1384,6 +1391,7 @@ function buildEditor(host, r) {
   else if (r.key === 'sleep') sleepEditor(box);
   else if (r.key === 'dimming') dimmingEditor(box);
   else if (r.key === 'gaming') gamingEditor(box);
+  else if (r.key === 'scroll') scrollEditor(box);
   else if (r.key === 'onboard') onboardEditor(box);
   else if (r.key === 'macros') macrosEditor(box);
   else if (r.key === 'apps') appsEditor(box);
@@ -1855,6 +1863,87 @@ function gamingEditor(box) {
   box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Keys blocked so a game isn’t left by accident' }), ...rows),
     el('p', { className: 'note', textContent: 'Saved to this profile: tie the profile to a game (Profile → Switches with) and gaming mode comes on while you play.' }),
     el('p', { className: 'note', textContent: 'New and not yet confirmed on a keyboard. If a blocked key still works, please tell us.' }));
+}
+
+// Scroll wheel (HyperScroll mice): the wheel mode, the modes the wheel-mode button skips,
+// and scroll acceleration and Smart-Reel, each off or at a level 0-4 (low 0, medium 2, high 4).
+const SCROLL_MODES = [['tactile', 'Tactile', 'Notched steps'], ['free-spin', 'Free-spin', 'Spins freely'],
+  ['precision-tactile', 'Precision tactile', 'Finer notched steps']];
+const ASSIST_NAMES = { low: 0, medium: 2, high: 4 };
+const assistLevel = a => a == null || a === 'off' ? null : a in ASSIST_NAMES ? ASSIST_NAMES[a] : +a;
+const assistText = a => a == null || a === 'off' ? 'off' : a in ASSIST_NAMES ? a : 'level ' + a;
+function scrollOf(name) {
+  if (name === dev.active && dev.scroll) return dev.scroll;
+  const w = prof(name).scroll || {};
+  return Object.keys(w).length ? w : null;
+}
+function scrollText(w) {
+  const mode = (SCROLL_MODES.find(m => m[0] === w.mode) || [, 'As the mouse has it'])[1];
+  const extra = [w.acceleration && w.acceleration !== 'off' && 'acceleration ' + assistText(w.acceleration),
+    w.smart_reel && w.smart_reel !== 'off' && 'Smart-Reel ' + assistText(w.smart_reel)].filter(Boolean);
+  return [mode, ...extra].join(' · ');
+}
+async function scrollSend(body, done) {
+  try {
+    const r = await api('/api/scroll', body);
+    dev.scroll = r.scroll;
+    dev.profile.scroll = Object.assign({}, dev.profile.scroll,
+      { mode: r.scroll.mode, acceleration: r.scroll.acceleration, smart_reel: r.scroll.smart_reel },
+      r.scroll.precision ? { disabled: r.scroll.disabled } : {});
+    refreshCell('scroll');
+    toast(done + ' · saved to ' + dev.active);
+  } catch (err) { toast(err.message, true); }
+}
+function scrollEditor(box) {
+  const w = dev.scroll;
+  const modes = SCROLL_MODES.filter(m => w.precision || m[0] !== 'precision-tactile');
+  const grid = el('div', { className: 'dimgrid', role: 'group', ariaLabel: 'Scroll wheel mode' });
+  const skips = el('div', { className: 'edgroup' });
+  const draw = () => {
+    [...grid.children].forEach(t => t.setAttribute('aria-pressed', t.dataset.v === dev.scroll.mode));
+    skips.querySelectorAll('input').forEach(i => {
+      const off = dev.scroll.disabled.includes(i.dataset.v);
+      i.checked = off;
+      // The mode in use can't be skipped, and one mode always stays in the cycle.
+      i.disabled = i.dataset.v === dev.scroll.mode || (!off && dev.scroll.disabled.length >= modes.length - 1);
+    });
+  };
+  modes.forEach(([v, text, sub]) => grid.append(el('button', { className: 'tile', dataset: { v }, onclick: async e => {
+    const t = e.currentTarget; t.disabled = true;
+    await scrollSend({ scroll_mode: v }, 'Wheel: ' + text.toLowerCase());
+    draw(); t.disabled = false;
+  } }, el('div', {}, el('span', { className: 'tv', textContent: text }), el('span', { className: 'tl', textContent: sub })))));
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Wheel mode' }), grid));
+  if (w.precision) {
+    skips.append(el('h3', { textContent: 'Skipped by the wheel-mode button' }), ...modes.map(([v, text]) => {
+      const input = el('input', { type: 'checkbox', className: 'switch', id: 'sk-' + v, dataset: { v }, onchange: async e => {
+        const t = e.target;
+        const want = modes.map(m => m[0]).filter(m => m === v ? t.checked : dev.scroll.disabled.includes(m));
+        const names = modes.filter(m => want.includes(m[0])).map(m => m[1].toLowerCase());
+        await scrollSend({ scroll_disabled: want.join(',') || 'none' }, names.length ? 'Skips ' + names.join(', ') : 'Cycles through every mode');
+        draw();
+      } });
+      return el('div', { className: 'row' }, input, el('label', { htmlFor: 'sk-' + v, textContent: 'Skip ' + text.toLowerCase() }));
+    }));
+    box.append(skips);
+  }
+  const assist = (field, title, note) => {
+    const level = assistLevel(dev.scroll[field]);
+    const on = el('input', { type: 'checkbox', className: 'switch', id: 'as-' + field, checked: level != null });
+    const range = el('input', { type: 'range', min: 0, max: 4, step: 1, value: level ?? 2, disabled: level == null, ariaLabel: title + ' level' });
+    const named = v => Object.keys(ASSIST_NAMES).find(k => ASSIST_NAMES[k] === +v) || v;
+    const send = () => scrollSend({ [field]: on.checked ? range.value : 'off' }, title + ' ' + (on.checked ? assistText(named(range.value)) : 'off'));
+    on.onchange = () => { range.disabled = !on.checked; send(); };
+    range.onchange = send;
+    range.style.flex = '1';
+    const scale = el('div', { className: 'row' }, el('span', { className: 'tl', textContent: 'Low' }), range, el('span', { className: 'tl', textContent: 'High' }));
+    scale.style.flexWrap = 'nowrap';
+    box.append(el('div', { className: 'edgroup' }, el('div', { className: 'row' }, on, el('label', { htmlFor: on.id, textContent: title })), scale,
+      el('p', { className: 'note', textContent: note })));
+  };
+  assist('acceleration', 'Scroll acceleration', 'Scrolls further the faster you spin, in free-spin.');
+  assist('smart_reel', 'Smart-Reel', 'Free-spin while you flick the wheel, notched again when it stops. The level sets how fast a flick has to be.');
+  draw();
 }
 
 // Asks Razer's public product page whether newer firmware is out. Never installs anything.

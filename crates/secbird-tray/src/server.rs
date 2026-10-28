@@ -306,6 +306,16 @@ struct Body {
     /// Keyboards: the keys gaming mode blocks, `off` or like `win,alt-tab`.
     #[serde(default)]
     game_mode: String,
+    /// Scroll wheel: any of the mode, the skipped modes (`none` or like `free-spin`),
+    /// acceleration and Smart-Reel (`off`, `low`, `medium`, `high` or 0-4). Empty: left alone.
+    #[serde(default)]
+    scroll_mode: String,
+    #[serde(default)]
+    scroll_disabled: Option<String>,
+    #[serde(default)]
+    acceleration: String,
+    #[serde(default)]
+    smart_reel: String,
     /// Macro steps as text (`tap:ctrl+c wait:50`), and a macro id.
     #[serde(default)]
     script: String,
@@ -405,6 +415,31 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
             "/api/gaming" => {
                 actions::set_game_mode(dev, &mut store, b.game_mode.parse()?)?;
                 Ok(json!({ "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()) }))
+            }
+            "/api/scroll" => {
+                // What was sent goes over the read-back: the wheel takes a moment to switch.
+                let mut sent = secbird_core::ScrollSettings::default();
+                if let Some(modes) = &b.scroll_disabled {
+                    let modes = secbird_core::scroll::parse_modes(modes)?;
+                    actions::set_scroll_disabled(dev, &mut store, modes.clone())?;
+                    sent.disabled = Some(modes);
+                }
+                if !b.scroll_mode.is_empty() {
+                    let m = b.scroll_mode.parse()?;
+                    actions::set_scroll_mode(dev, &mut store, m)?;
+                    sent.mode = Some(m);
+                }
+                if !b.acceleration.is_empty() {
+                    let a = b.acceleration.parse()?;
+                    actions::set_scroll_acceleration(dev, &mut store, a)?;
+                    sent.acceleration = Some(a);
+                }
+                if !b.smart_reel.is_empty() {
+                    let a = b.smart_reel.parse()?;
+                    actions::set_smart_reel(dev, &mut store, a)?;
+                    sent.smart_reel = Some(a);
+                }
+                Ok(json!({ "scroll": dev.scroll_wheel().ok().flatten().map(|w| sent.overlay(w)) }))
             }
             "/api/sleep" => {
                 if let Some(on) = b.auto {
@@ -768,6 +803,8 @@ fn device_json(dev: &Device) -> Value {
         "dimming": dev.dimming().ok().flatten().map(|d| d.to_string()),
         // Only keyboards that answer the read get the Gaming section.
         "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()),
+        // Only mice whose wheel answers get the Scroll wheel section.
+        "scroll": dev.scroll_wheel().ok().flatten(),
         "macros": dev.macro_storage().is_ok(),
         "matrix": spec.and_then(|s| s.matrix).map(|m| json!({ "rows": m.rows, "cols": m.cols, "first": m.first })),
         "leds": spec.map(|s| s.leds.iter().map(|l| json!({ "name": l.name, "id": l.id })).collect::<Vec<_>>()).unwrap_or_default(),

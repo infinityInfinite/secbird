@@ -62,6 +62,35 @@ pub fn set_game_mode(dev: &Device, store: &mut Store, mode: crate::GameMode) -> 
     store.save()
 }
 
+pub fn set_scroll_mode(dev: &Device, store: &mut Store, mode: crate::ScrollMode) -> Result<()> {
+    dev.set_scroll_mode(mode)?;
+    let scroll = &mut store.for_device(dev).active_mut().scroll;
+    scroll.mode = Some(mode);
+    // Switching to a skipped mode put it back in the cycle.
+    if let Some(disabled) = &mut scroll.disabled {
+        disabled.retain(|m| *m != mode);
+    }
+    store.save()
+}
+
+pub fn set_scroll_disabled(dev: &Device, store: &mut Store, disabled: Vec<crate::ScrollMode>) -> Result<()> {
+    dev.set_scroll_disabled(&disabled)?;
+    store.for_device(dev).active_mut().scroll.disabled = Some(disabled);
+    store.save()
+}
+
+pub fn set_scroll_acceleration(dev: &Device, store: &mut Store, a: crate::Assist) -> Result<()> {
+    dev.set_scroll_acceleration(a)?;
+    store.for_device(dev).active_mut().scroll.acceleration = Some(a);
+    store.save()
+}
+
+pub fn set_smart_reel(dev: &Device, store: &mut Store, a: crate::Assist) -> Result<()> {
+    dev.set_smart_reel(a)?;
+    store.for_device(dev).active_mut().scroll.smart_reel = Some(a);
+    store.save()
+}
+
 pub fn set_auto_sleep(dev: &Device, store: &mut Store, enabled: bool) -> Result<()> {
     dev.set_auto_sleep(enabled)?;
     store.for_device(dev).active_mut().auto_sleep = Some(enabled);

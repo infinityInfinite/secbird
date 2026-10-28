@@ -33,6 +33,15 @@ SETTINGS (saved to the active profile):
   gaming [off|win,alt-tab,alt-f4]
                             Keyboards: gaming mode, the keys it blocks (any of win,
                             alt-tab and alt-f4). Untested on hardware yet
+  scroll                    Mice with a HyperScroll wheel: wheel mode, acceleration,
+                            Smart-Reel
+  scroll mode <tactile|free-spin|precision-tactile>
+  scroll acceleration <off|low|medium|high|0-4>
+                            Faster scrolling in free-spin
+  scroll smart-reel <off|low|medium|high|0-4>
+                            Free-spin while the wheel is flicked, notched again when it stops
+  scroll disable <none|MODE[,MODE]>
+                            Modes the wheel-mode button skips (at most two)
   color <zone> <RRGGBB>     Static color for a lighting zone (name or id)
   brightness <zone> <0-100> Brightness for a lighting zone
   off <zone>                Turn a lighting zone off
@@ -421,6 +430,7 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
                 Ok(())
             }
         },
+        "scroll" => scroll_cmd(dev, &mut store, rest),
         "macro" => macro_cmd(dev, &mut store, rest),
         "poll" => match rest.first() {
             None => {
@@ -513,6 +523,19 @@ fn profile_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), E
             }
             if let Some(g) = &p.game_mode {
                 println!("  gaming     {g}");
+            }
+            let w = &p.scroll;
+            if let Some(m) = w.mode {
+                println!("  scroll     {m}");
+            }
+            if let Some(d) = &w.disabled {
+                println!("  skipped    {}", secbird_core::scroll::modes_text(d));
+            }
+            if let Some(a) = w.acceleration {
+                println!("  accel      {a}");
+            }
+            if let Some(a) = w.smart_reel {
+                println!("  smart-reel {a}");
             }
             for (zone, z) in &p.lighting {
                 let state = match (z.off, z.color) {
@@ -813,6 +836,50 @@ fn game_mode_text(g: secbird_core::GameMode) -> String {
     format!("on, blocks {}", keys.join(", "))
 }
 
+fn scroll_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
+    let args: Vec<&str> = rest.iter().map(String::as_str).collect();
+    // What was just sent, shown over the read-back (the wheel takes a moment to switch).
+    let mut sent = secbird_core::ScrollSettings::default();
+    match args.as_slice() {
+        [] => {}
+        ["mode", m] => {
+            let m = m.parse()?;
+            actions::set_scroll_mode(dev, store, m)?;
+            sent.mode = Some(m);
+        }
+        ["acceleration", a] => {
+            let a = a.parse()?;
+            actions::set_scroll_acceleration(dev, store, a)?;
+            sent.acceleration = Some(a);
+        }
+        ["smart-reel", a] => {
+            let a = a.parse()?;
+            actions::set_smart_reel(dev, store, a)?;
+            sent.smart_reel = Some(a);
+        }
+        ["disable", modes] => {
+            let modes = secbird_core::scroll::parse_modes(modes)?;
+            actions::set_scroll_disabled(dev, store, modes.clone())?;
+            sent.disabled = Some(modes);
+        }
+        _ => return Err(Error::InvalidArg("see `secbird --help` for scroll".into())),
+    }
+    match dev.scroll_wheel()? {
+        None => println!("{} has no scroll wheel settings.", dev.name()),
+        Some(w) => print_scroll_wheel(&sent.overlay(w)),
+    }
+    Ok(())
+}
+
+fn print_scroll_wheel(w: &secbird_core::ScrollWheel) {
+    println!("Scroll mode   {}", w.mode);
+    if w.precision {
+        println!("Skipped       {}", secbird_core::scroll::modes_text(&w.disabled));
+    }
+    println!("Acceleration  {}", w.acceleration);
+    println!("Smart-Reel    {}", w.smart_reel);
+}
+
 fn info(dev: &Device, store: &mut Store) -> Result<(), Error> {
     let (major, minor) = dev.firmware()?;
     println!("Device    {} ({:04X})", dev.name(), dev.pid);
@@ -843,6 +910,13 @@ fn info(dev: &Device, store: &mut Store) -> Result<(), Error> {
     }
     if let Ok(Some(g)) = dev.game_mode() {
         println!("Gaming    {}", game_mode_text(g));
+    }
+    if let Ok(Some(w)) = dev.scroll_wheel() {
+        let skipped = match w.disabled.is_empty() {
+            true => String::new(),
+            false => format!(", skips {}", secbird_core::scroll::modes_text(&w.disabled)),
+        };
+        println!("Scroll    {}{skipped}; acceleration {}, Smart-Reel {}", w.mode, w.acceleration, w.smart_reel);
     }
     if let Some(spec) = &dev.spec {
         if !spec.leds.is_empty() {

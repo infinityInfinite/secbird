@@ -26,6 +26,7 @@ pub mod net;
 pub mod profile;
 pub mod proto;
 pub mod report;
+pub mod scroll;
 pub mod sim;
 pub mod transport;
 pub mod update;
@@ -35,6 +36,7 @@ pub use device::{discover, Device};
 pub use error::{Error, Result};
 pub use features::{Dimming, DpiStages, GameMode, Rgb, SleepTimer};
 pub use profile::{Profile, Store, Zone};
+pub use scroll::{Assist, ScrollMode, ScrollSettings, ScrollWheel};
 pub use transport::Transport;
 
 /// `%APPDATA%\Secretarybird`: profiles.json and the user's devices.json.

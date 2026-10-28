@@ -48,6 +48,9 @@ pub struct Profile {
     /// [`crate::GameMode`]. Per profile, so a profile tied to a game can turn it on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game_mode: Option<String>,
+    /// Mice with a HyperScroll wheel: wheel mode, acceleration, Smart-Reel.
+    #[serde(default, skip_serializing_if = "crate::ScrollSettings::is_empty")]
+    pub scroll: crate::ScrollSettings,
     /// Lighting zone name (or numeric id) -> state.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub lighting: BTreeMap<String, Zone>,
@@ -421,6 +424,20 @@ impl Profile {
         }
         if let Some(g) = &self.game_mode {
             push(format!("gaming mode: {g}"), g.parse().and_then(|g| dev.set_game_mode(g)));
+        }
+        // Skipped modes first: switching to a skipped mode puts it back in the cycle.
+        if let Some(disabled) = &self.scroll.disabled {
+            let text = crate::scroll::modes_text(disabled);
+            push(format!("scroll modes off: {text}"), dev.set_scroll_disabled(disabled));
+        }
+        if let Some(m) = self.scroll.mode {
+            push(format!("scroll mode {m}"), dev.set_scroll_mode(m));
+        }
+        if let Some(a) = self.scroll.acceleration {
+            push(format!("scroll acceleration {a}"), dev.set_scroll_acceleration(a));
+        }
+        if let Some(a) = self.scroll.smart_reel {
+            push(format!("smart-reel {a}"), dev.set_smart_reel(a));
         }
         for (name, zone) in self.lighting.iter().filter(|_| lighting) {
             let led = match dev.led_id(name) {
