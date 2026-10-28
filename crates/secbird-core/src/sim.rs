@@ -112,6 +112,8 @@ pub struct SimState {
     pub keys: BTreeMap<(u8, u8, u8), (u8, [u8; 5])>,
     /// Answer this many reads with Busy before the real reply.
     pub busy_reads: u32,
+    /// Scroll wheel settings by (class, SET command id, store): the value.
+    pub scroll: BTreeMap<(u8, u8, u8), u8>,
     /// Every well-formed command received, in order.
     pub log: Vec<Command>,
     reply: Option<Report>,
@@ -152,6 +154,7 @@ impl SimState {
             button_list: None,
             keys: BTreeMap::new(),
             busy_reads: 0,
+            scroll: BTreeMap::new(),
             log: Vec::new(),
             reply: None,
         }
@@ -554,6 +557,20 @@ impl SimState {
                 }
                 ok(vec![])
             }
+            // Scroll wheel settings, `[store, value]`, by (class, SET id, store).
+            c if self.scroll.keys().any(|&(class, id, _)| class == c.class && id == c.id & 0x7F) => {
+                let key = (c.class, c.id & 0x7F, a[0]);
+                match c.id & 0x80 != 0 {
+                    true => match self.scroll.get(&key) {
+                        Some(&v) => ok(vec![a[0], v]),
+                        None => (Failed, vec![]),
+                    },
+                    false => {
+                        self.scroll.insert(key, a[1]);
+                        ok(a[..2].to_vec())
+                    }
+                }
+            }
             _ => (NotSupported, vec![]),
         }
     }
@@ -620,6 +637,20 @@ impl Sim {
         s.auto_sleep = Some(true);
         s.macros = Some(BTreeMap::new());
         s.leds = vec![4];
+        // A HyperScroll wheel as a Naga V3 Pro showed it: tactile, all modes in the cycle,
+        // acceleration and Smart-Reel off at medium.
+        for store in [0, 1] {
+            for (c, v) in [
+                (cmd::SCROLL_MODE, 0),
+                (cmd::SCROLL_MODES_ENABLED, 7),
+                (cmd::SCROLL_ACCELERATION, 0),
+                (cmd::SCROLL_ACCELERATION_LEVEL, 2),
+                (cmd::SMART_REEL, 0),
+                (cmd::SMART_REEL_LEVEL, 2),
+            ] {
+                s.scroll.insert((c.class, c.id, store), v);
+            }
+        }
         let mut factory: Vec<(u8, u8, [u8; 5])> = vec![
             (1, 1, [1, 0, 0, 0, 0]),
             (2, 1, [2, 0, 0, 0, 0]),
@@ -923,6 +954,39 @@ mod tests {
         assert_eq!(dev.firmware().unwrap(), (1, 2));
         sim.state().busy_reads = 100;
         assert!(matches!(dev.firmware(), Err(Error::NoReply(_))));
+    }
+
+    #[test]
+    fn naga_scroll_wheel_settings() {
+        use crate::{Assist, ScrollMode};
+        let sim = Sim::naga();
+        let dev = open(&sim, NAGA_PID);
+        let wheel = dev.scroll_wheel().unwrap().unwrap();
+        assert_eq!((wheel.mode, wheel.precision), (ScrollMode::Tactile, true));
+        assert!(wheel.disabled.is_empty());
+        assert_eq!((wheel.acceleration, wheel.smart_reel), (Assist::Off, Assist::Off));
+
+        dev.set_scroll_mode(ScrollMode::PrecisionTactile).unwrap();
+        dev.set_scroll_acceleration(Assist::On(4)).unwrap();
+        dev.set_smart_reel(Assist::On(0)).unwrap();
+        dev.set_scroll_disabled(&[ScrollMode::FreeSpin]).unwrap();
+        let wheel = dev.scroll_wheel().unwrap().unwrap();
+        assert_eq!(wheel.mode, ScrollMode::PrecisionTactile);
+        assert_eq!(wheel.disabled, [ScrollMode::FreeSpin]);
+        assert_eq!((wheel.acceleration, wheel.smart_reel), (Assist::On(4), Assist::On(0)));
+        // Live store and the saved slot both get it; the mask leaves free-spin out.
+        let scroll = |c: Command, store| sim.state().scroll[&(c.class, c.id, store)];
+        assert_eq!((scroll(cmd::SCROLL_MODES_ENABLED, 0), scroll(cmd::SCROLL_MODES_ENABLED, 1)), (5, 5));
+
+        // The mode in use can't be skipped, nor all three; switching to a skipped mode
+        // puts it back in the cycle.
+        assert!(dev.set_scroll_disabled(&[ScrollMode::PrecisionTactile]).is_err());
+        assert!(dev.set_scroll_disabled(&[ScrollMode::Tactile, ScrollMode::FreeSpin, ScrollMode::PrecisionTactile]).is_err());
+        dev.set_scroll_mode(ScrollMode::FreeSpin).unwrap();
+        assert!(dev.scroll_wheel().unwrap().unwrap().disabled.is_empty());
+
+        // A mouse without the commands has no scroll wheel settings.
+        assert_eq!(open(&Sim::mouse(), MOUSE_PID).scroll_wheel().unwrap(), None);
     }
 
     #[test]

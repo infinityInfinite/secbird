@@ -16,6 +16,9 @@ const READ_RETRIES: u32 = 30;
 /// reads and retries 40 times. Allow up to about two seconds.
 const FLASH_RETRIES: u32 = 200;
 
+/// How many times [`Device::transact_echo`] sends a request before giving up.
+const ECHO_SENDS: u32 = 3;
+
 /// Transaction ids seen across Razer devices, tried in order when the database has none.
 pub const TXID_CANDIDATES: [u8; 4] = [0x1F, 0x3F, 0xFF, 0x9F];
 
@@ -110,17 +113,38 @@ impl Device {
     /// Send one command and wait for its reply. `size` is the argument length the
     /// device expects for this command.
     pub fn transact(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES, false)
+        transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES, false, &[])
+    }
+
+    /// [`Device::transact`] that only takes a reply echoing `args[..echo]`. A dock, or
+    /// Synapse talking to the same mouse, can hand back the reply to another request with
+    /// the same command (seen on a Naga V3 Pro on a Mouse Dock Pro). Asks again if no
+    /// reply fits.
+    pub(crate) fn transact_echo(&self, command: Command, size: u8, args: &[u8], echo: usize) -> Result<Report> {
+        let echo = &args[..echo.min(args.len())];
+        let mut result = Err(Error::NoReply(command));
+        for _ in 0..ECHO_SENDS {
+            result = transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES, false, echo);
+            if !matches!(result, Err(Error::NoReply(_))) {
+                break;
+            }
+        }
+        result
+    }
+
+    /// [`Device::transact_echo`] for a GET.
+    pub(crate) fn get_echo(&self, command: Command, size: u8, args: &[u8], echo: usize) -> Result<Report> {
+        self.transact_echo(command.get(), size, args, echo)
     }
 
     /// [`Device::transact`] for commands that write flash and answer slowly.
     pub(crate) fn transact_slow(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES, false)
+        transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES, false, &[])
     }
 
     /// [`Device::transact`] with another transaction id (see [`DOCK_TXID`]).
     pub fn transact_as(&self, txid: u8, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), txid, command, size, args, READ_RETRIES, true)
+        transact(self.transport.as_ref(), txid, command, size, args, READ_RETRIES, true, &[])
     }
 
     /// Whether this is a mouse dock, whose own settings take [`DOCK_TXID`].
@@ -185,8 +209,19 @@ fn connected_mouse_pid(args: &[u8]) -> Option<u16> {
 }
 
 /// `exact`: only accept a reply carrying our txid. A dock forwards the docked mouse's
-/// replies, which would otherwise pass for the dock's own.
-fn transact(hid: &dyn Transport, txid: u8, command: Command, size: u8, args: &[u8], retries: u32, exact: bool) -> Result<Report> {
+/// replies, which would otherwise pass for the dock's own. `echo`: only accept a reply
+/// whose arguments start with these bytes.
+#[allow(clippy::too_many_arguments)]
+fn transact(
+    hid: &dyn Transport,
+    txid: u8,
+    command: Command,
+    size: u8,
+    args: &[u8],
+    retries: u32,
+    exact: bool,
+    echo: &[u8],
+) -> Result<Report> {
     let req = Report::request(txid, command, size, args);
     let mut buf = [0u8; REPORT_LEN + 1]; // byte 0 is the HID report id (0)
     buf[1..].copy_from_slice(&req.0);
@@ -202,7 +237,7 @@ fn transact(hid: &dyn Transport, txid: u8, command: Command, size: u8, args: &[u
         let mut body = [0u8; REPORT_LEN];
         body.copy_from_slice(&reply[n - REPORT_LEN..n]);
         let rep = Report(body);
-        if rep.command() != command || (exact && rep.txid() != txid) {
+        if rep.command() != command || (exact && rep.txid() != txid) || !rep.args().starts_with(echo) {
             continue;
         }
         match rep.status() {
@@ -301,7 +336,7 @@ impl Device {
         spec: Option<DeviceSpec>,
     ) -> Option<Device> {
         let (txid, reply) = txids.iter().copied().find_map(|t| {
-            transact(transport.as_ref(), t, cmd::SERIAL.get(), cmd::SERIAL_SIZE, &[], READ_RETRIES, false).ok().map(|r| (t, r))
+            transact(transport.as_ref(), t, cmd::SERIAL.get(), cmd::SERIAL_SIZE, &[], READ_RETRIES, false, &[]).ok().map(|r| (t, r))
         })?;
         let serial = parse_serial(reply.args());
         Some(Device { transport, pid, serial, interface, path, txid, spec })

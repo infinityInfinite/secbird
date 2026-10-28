@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Scroll wheel settings on mice with a HyperScroll wheel: the wheel mode (tactile, free-spin,
+  precision tactile), which modes the wheel-mode button skips, scroll acceleration and Smart-Reel,
+  each off or at a level 0-4 like Synapse's sliders (the new Scroll wheel section, or
+  `secbird scroll mode free-spin`, `secbird scroll smart-reel medium`). Saved per profile. Read
+  and level ranges checked on a Naga V3 Pro on a Mouse Dock Pro.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added
