@@ -1506,12 +1506,16 @@ function effectLabel(e) {
 function effectGroup(name) {
   const z = zoneOf(dev.profile, name), cur = z.effect || '';
   const [kind0, rest = ''] = cur.split(':'), [arg0, n0] = rest.split('@');
-  const kind = cur ? kind0 : 'static';
+  const unsupported = dev.unsupported_effects || [];
+  // Old profiles may contain an effect the device was later shown not to run.
+  // Present Static as the safe default; selecting an effect saves the replacement.
+  const kind = cur && !unsupported.includes(kind0) ? kind0 : 'static';
   const sel = el('select', { id: 'zoneFx', ariaLabel: 'Effect' });
   // Battery is offered for a dock's light only (#39), where Synapse has its battery-level
   // lighting. The dock takes reactive and starlight but shows nothing, so those are left out.
   const dockOnly = ['battery'], notOnDock = ['reactive', 'starlight'];
-  EFFECTS.filter(([v]) => name === 'dock' ? !notOnDock.includes(v) : !dockOnly.includes(v)).forEach(([v, t]) => sel.append(new Option(t, v, false, v === kind)));
+  EFFECTS.filter(([v]) => !unsupported.includes(v) && (name === 'dock' ? !notOnDock.includes(v) : !dockOnly.includes(v)))
+    .forEach(([v, t]) => sel.append(new Option(t, v, false, v === kind)));
   const dir = el('select', { ariaLabel: 'Wave direction' });
   [['right', 'Right →'], ['left', '← Left']].forEach(([v, t]) => dir.append(new Option(t, v, false, kind === 'wave' && v === (arg0 || 'right'))));
   const speed = el('input', { type: 'range', min: 1, max: 5, step: 1, value: kind === 'wave' ? (n0 || 3) : 3, ariaLabel: 'Wave speed' });
@@ -1522,7 +1526,10 @@ function effectGroup(name) {
   const note = el('p', { className: 'note' });
   const show = () => {
     const k = sel.value;
-    note.textContent = k === 'battery'
+    const savedKind = (zoneOf(dev.profile, name).effect || '').split(':')[0];
+    note.textContent = savedKind && unsupported.includes(savedKind)
+      ? 'The saved ' + savedKind + ' effect is not supported on this device. Choose an available effect to replace it.'
+      : k === 'battery'
       ? 'Green when the mouse is charged, through yellow and orange to red when it’s nearly empty. Secretarybird updates it every 5 minutes.'
       : 'Runs on the device itself. Not every device has every effect; it says so if not.';
     dir.hidden = speed.hidden = k !== 'wave';
@@ -1541,8 +1548,14 @@ function effectGroup(name) {
     try {
       await api('/api/effect', { zone: name, effect: text });
       record(name, { effect: text, off: false });
+      show();
       toast(effectLabel(text) + ' · saved to ' + dev.active);
-    } catch (e) { toast(e.message, true); sel.value = (zoneOf(dev.profile, name).effect || 'static').split(':')[0]; show(); }
+    } catch (e) {
+      toast(e.message, true);
+      const previous = (zoneOf(dev.profile, name).effect || 'static').split(':')[0];
+      sel.value = unsupported.includes(previous) ? 'static' : previous;
+      show();
+    }
   };
   [sel, dir, speed, dur, rnd].forEach(c => c.onchange = send);
   show();

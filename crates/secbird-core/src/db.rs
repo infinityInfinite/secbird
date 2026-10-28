@@ -96,6 +96,10 @@ pub struct DeviceSpec {
     pub lighting: Lighting,
     #[serde(default)]
     pub leds: Vec<Led>,
+    /// Effect names that were tested on this model but did not work correctly.
+    /// Used by the editor and enforced before sending lighting commands.
+    #[serde(default)]
+    pub unsupported_effects: Vec<String>,
     #[serde(default)]
     pub matrix: Option<Matrix>,
     #[serde(default)]
@@ -253,6 +257,18 @@ mod tests {
         let spec = db.get(0x0099).expect("Basilisk V3 entry");
         assert_eq!(spec.interface, Some(3));
         assert_eq!(spec.dpi.as_ref().unwrap().max, 26000);
+    }
+
+    #[test]
+    fn basilisk_v4_hyperspeed_has_one_underglow_zone() {
+        let db = Db::builtin().unwrap();
+        for pid in [0x00EA, 0x00EB] {
+            let spec = db.get(pid).expect("Basilisk V4 HyperSpeed");
+            assert_eq!(spec.leds.len(), 1, "PID {pid:04X}: exactly one RGB zone");
+            assert_eq!(spec.leds[0].name, "underglow");
+            assert_eq!(spec.leds[0].id, 10);
+            assert_eq!(spec.unsupported_effects, ["reactive", "starlight"]);
+        }
     }
 
     #[test]

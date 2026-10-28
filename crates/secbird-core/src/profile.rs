@@ -436,7 +436,12 @@ impl Profile {
             if zone.off {
                 push(format!("{name} off"), dev.lights_off(led));
             } else if let Some(effect) = &zone.effect {
-                push(format!("{name} {effect}"), dev.set_effect(led, effect));
+                // Older saved profiles may still contain an effect later found to
+                // be unsupported. Leave the LED alone rather than sending a bad
+                // write (or reporting a failure on every startup and rescan).
+                if dev.supports_effect(effect) {
+                    push(format!("{name} {effect}"), dev.set_effect(led, effect));
+                }
             } else if let Some(color) = zone.color {
                 push(format!("{name} color {color}"), dev.set_static_color(led, color));
             }
