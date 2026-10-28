@@ -123,6 +123,10 @@
   .dot.off { background: none; border: 1.5px dashed var(--line-strong); }
 
   .tiles { overflow-y: auto; padding: 16px 20px 20px; min-width: 0; }
+  .camera-preview { margin-top: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .camera-preview video { width: 100%; max-height: 38vh; aspect-ratio: 16 / 9; object-fit: contain; background: #111; display: block; margin: 10px 0; }
+  .camera-preview .row { flex-wrap: wrap; }
+  .camera-preview select { max-width: 100%; min-height: 36px; }
   .sechead { display: flex; align-items: center; gap: 14px; margin: 0 0 12px; min-height: 30px; flex-wrap: wrap; }
   .sechead h2 { margin: 0; font-size: 17px; font-weight: 650; }
   .sechead .tools { display: flex; align-items: center; gap: 12px; margin-left: auto; }
@@ -489,6 +493,9 @@
 </main>
 <div id="toast" role="status" aria-live="polite"></div>
 
+<script>{{CAMERA_PREVIEW_JS}}</script>
+<script>{{CAMERA_CONTROLS_JS}}</script>
+<script>{{EDITOR_PROFILES_JS}}</script>
 <script>
 const T = new URLSearchParams(location.search).get('t');
 const $ = id => document.getElementById(id);
@@ -499,7 +506,7 @@ const PRESETS = [['FF0000','Red'],['FF2800','Orange'],['FF9600','Yellow'],['00FF
                  ['0000FF','Blue'],['5000FF','Purple'],['FF00FF','Magenta'],['FF0028','Pink'],['FFFFFF','White']];
 const NAMES = { scroll: 'Scroll wheel', logo: 'Logo', underglow: 'Underglow', backlight: 'Backlight', side: 'Side plate', profile: 'Profile light', dock: 'Dock' };
 const KINDS = { mouse: 'Mouse', keyboard: 'Keyboard', laptop: 'Laptop', keypad: 'Keypad', mousepad: 'Mousepad',
-  headset: 'Headset', accessory: 'Accessory', unknown: 'Device' };
+  headset: 'Headset', accessory: 'Accessory', webcam: 'Webcam', unknown: 'Device' };
 let devices = [], unsupported = [], synapse = [], dev = null, showAll = null;
 let sel = null, section = null, view = 'work'; // selected tile, rail section, 'work' or 'compare'
 let btnFailed = {}, btnData = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
@@ -607,6 +614,7 @@ function layout(m, kind) {
 }
 
 async function api(path, body) {
+  if (path === '/api/profile' && (body?.id || dev?.id || '').startsWith('camera:')) path = '/api/camera-profile';
   const r = await fetch(path, {
     method: body ? 'POST' : 'GET',
     headers: { 'X-Secbird-Token': T, 'Content-Type': 'application/json' },
@@ -730,7 +738,7 @@ function deviceArt(d) {
 }
 const artTile = d => el('span', { className: 'dtile', innerHTML: `<svg class="dart" viewBox="0 0 24 24" aria-hidden="true">${ART[deviceArt(d)]}</svg>` });
 
-const devLabel = d =>devices.filter(x => x.pid === d.pid).length > 1 && d.serial ? d.name + ' (' + d.serial.slice(-4) + ')' : d.name;
+const devLabel = d => SecbirdProfiles.deviceLabel(d, devices);
 
 // A device's profiles: the active one is `dev.profile`, the rest come from `profilesData`.
 function adopt(d) {
@@ -754,6 +762,7 @@ const keyCount = () => dev.matrix.rows * dev.matrix.cols;
 // ---------- Rendering ----------
 
 function render() {
+  if (previewWidget && (showAll || showSettings || view === 'compare' || dev?.id !== previewWidget.ownerId)) discardCameraPreview();
   const has = devices.length > 0;
   if (!has) showAll = unsupported.length > 0;
   $('empty').hidden = has || unsupported.length > 0 || showSettings;
@@ -853,6 +862,16 @@ function paintPreview() {
 // Sections of this device, each with its tiles. Only what the device has.
 function sections() {
   const s = [];
+  if (dev.kind === 'webcam') {
+    const controls=standardControls[dev.id]?.items||[];
+    const rows=group=>controls.filter(info=>info.group===group).map(info=>({key:'standard:'+info.control,label:info.control.replaceAll('-',' ')}));
+    s.push({id:'image',name:'Image',rows:rows('image')});
+    s.push({ id: 'camera', name: 'Camera', rows: [
+      { key: 'camera:hdr', label: 'HDR' }, { key: 'camera:hdr-mode', label: 'HDR mode' },
+      { key: 'camera:fov', label: 'Field of view' }, { key: 'camera:af-mode', label: 'Autofocus strategy' },
+      ...rows('camera'),
+    ] });
+  }
   const light = dev.leds.map(l => ({ key: 'zone:' + l.name, label: label(l.name) }));
   if (dev.matrix) light.push({ key: 'keys', label: 'Per-key colors' });
   if (light.length) s.push({ id: 'light', name: 'Lighting',
@@ -945,8 +964,10 @@ function renderWork(keepPanel) {
     entering = true;
   }
   const cur = secs.find(s => s.id === section);
+  if (!['camera','image'].includes(section)) discardCameraPreview();
   if (entering && !sel) sel = autoOpen(cur);
   // Slow reads happen only when their section is open, once per device.
+  if(dev.kind==='webcam'&&['image','camera'].includes(section))loadStandardControls(dev.id);
   if (section === 'buttons') loadButtons(dev);
   if ((section === 'buttons' || section === 'macros') && dev.macros && macroData[dev.id] === undefined) loadMacros(dev);
   if (sel && sectionOf(sel) !== section) sel = null;
@@ -962,6 +983,7 @@ function renderTiles(cur) {
   t.innerHTML = '';
   const head = el('div', { className: 'sechead' }, el('h2', { textContent: cur.name }));
   const tools = el('div', { className: 'tools' });
+  if(dev.kind==='webcam'&&['image','camera'].includes(cur.id))tools.append(el('button',{className:'ghost',textContent:'Refresh camera values',onclick:()=>loadStandardControls(dev.id,true)}));
   if (cur.tools === 'layer') {
     if (Object.keys(dev.profile.buttons || {}).length) tools.append(el('button', { className: 'ghost', textContent: 'Restore all',
       title: `Every changed ${isBoard() ? 'key' : 'button'} back to what the ${holder()} stores`, onclick: restoreAllButtons }));
@@ -996,6 +1018,10 @@ function renderTiles(cur) {
   const g = el('div', { className: 'tgrid' });
   plain.forEach(r => g.append(tile(r)));
   t.append(g);
+  if (dev.kind==='webcam'&&['image','camera'].includes(cur.id)) {
+    if(standardControls[dev.id]?.error)t.append(el('p',{className:'note',textContent:standardControls[dev.id].error}));
+    mountCameraPreview(t);
+  }
   if (grid.length) {
     t.append(el('p', { className: 'subhead', textContent: 'Side grid' }));
     const k = el('div', { className: 'keypad' });
@@ -1243,6 +1269,8 @@ $('compareBtn').onclick = () => { view = view === 'compare' ? 'work' : 'compare'
 // Comparable value of a cell, to mark where another profile differs from the active one.
 function cellValue(key, name) {
   const p = prof(name), active = name === dev.active;
+  if(key.startsWith('standard:'))return JSON.stringify(p.camera?.controls?.[key.slice(9)]||null);
+  if (key.startsWith('camera:')) return String(p.camera?.[key.slice(7).replaceAll('-', '_')] ?? '');
   if (key.startsWith('zone:')) { const z = zoneOf(p, key.slice(5)); return p.keys && p.keys.length && dev.matrix ? 'keys' : z.off ? 'off' : (z.effect || z.color || '') + '/' + (z.brightness ?? 100); }
   if (key === 'keys') return (p.keys || []).join();
   if (key === 'dpi') return String(active && dev.dpi ? [dev.dpi.x, dev.dpi.y] : p.dpi || '');
@@ -1265,6 +1293,17 @@ const differs = (key, name) => name !== dev.active && cellValue(key, name) !== c
 // mouse saved. Other columns get their mark from differs().
 function cellView(key, name) {
   const p = prof(name), active = name === dev.active;
+  if(key.startsWith('standard:')) {
+    const control=key.slice(9),info=(standardControls[dev.id]?.items||[]).find(item=>item.control===control);
+    if(!info?.range)return ['<span class="unset">Unavailable</span>'];
+    const saved=p.camera?.controls?.[control];
+    if(active&&info.current)return [esc(info.current.automatic?'Auto':standardLabel(info,info.current.value))+' <small>readback</small>'];
+    return [saved?esc(saved.mode==='auto'?'Auto':standardLabel(info,saved.value))+' <small>saved</small>':'<span class="unset">Unchanged</span>'];
+  }
+  if (key.startsWith('camera:')) {
+    const value = p.camera?.[key.slice(7).replaceAll('-', '_')];
+    return [value == null ? '<span class="unset">Unchanged · current unknown</span>' : esc(typeof value === 'boolean' ? (value ? 'On' : 'Off') : label(value)) + ' <small>saved</small>'];
+  }
   if (key === 'lighting-control') return [dev.lighting_control ? 'Secretarybird' : '<span class="unset">Not controlled</span>'];
   if (key === 'onboard') {
     const o = onboardData[dev.id];
@@ -1375,7 +1414,9 @@ function profileHeader(n) {
 function buildEditor(host, r) {
   const box = el('div', { className: 'edbox' });
   host.append(box);
-  if (r.key === 'lighting-control') lightingControlEditor(box);
+  if (r.key.startsWith('standard:')) standardEditor(box,r.key.slice(9));
+  else if (r.key.startsWith('camera:')) cameraEditor(box, r.key.slice(7));
+  else if (r.key === 'lighting-control') lightingControlEditor(box);
   else if (r.key.startsWith('zone:')) zoneEditor(box, r.key.slice(5));
   else if (r.key === 'keys') keysEditor(box);
   else if (r.key === 'dpi') dpiEditor(box);
@@ -1390,6 +1431,171 @@ function buildEditor(host, r) {
   else if (r.key === 'device') deviceEditor(box);
   else if (r.key.startsWith('btn:')) buttonEditor(box, r.key.slice(4));
 }
+
+function cameraEditor(box, control) {
+  const target = dev, name = target.active;
+  const values = { hdr: ['off', 'on'], 'hdr-mode': ['dark', 'bright'], fov: ['wide', 'medium', 'narrow'], 'af-mode': ['responsive', 'passive'] }[control];
+  const field = control.replaceAll('-', '_'), saved = target.profile.camera?.[field];
+  const input = el('select', { ariaLabel: control });
+  input.append(new Option('Unchanged · current unknown', '', saved == null, saved == null));
+  for (const value of values) input.append(new Option(label(value), value, false, saved === (control === 'hdr' ? value === 'on' : value)));
+  input.onchange = async () => {
+    if (!input.value) return;
+    input.disabled = true;
+    try {
+      const response = await api('/api/camera', { id: target.id, profile: name, control, value: input.value });
+      Object.assign(target, response.device);
+      if (previewWidget?.ownerId === target.id) {
+        previewWidget.controller.refresh();
+        setTimeout(() => { if (previewWidget?.ownerId === target.id) previewWidget.controller.refresh(); }, 300);
+      }
+      if (dev === target) { adopt(response.device); render(); }
+      toast('Sent and saved. Current hardware values cannot be read back.');
+    } catch (error) { toast(error.message, true); if (dev === target) render(); }
+    finally { input.disabled = false; }
+  };
+  box.append(input, el('p', { className: 'note', textContent: 'Saved/requested settings, not live hardware readback. Unset controls are left unchanged.' }));
+  if (control === 'af-mode') box.append(el('p', { className: 'note', textContent: 'Responsive/passive changes the focusing strategy; this is not manual focus or an autofocus on/off switch.' }));
+  if (target.camera?.error) box.append(el('p', { className: 'note', textContent: target.camera.error }));
+}
+
+const standardControls={};
+const standardBusy=new Set();
+function standardLabel(info,value){return info.kind==='range'?String(value):SecbirdControls.options(info).find(item=>item.value===value)?.label||String(value);}
+async function loadStandardControls(id,force=false){
+  const cache=standardControls[id]||={items:null,loading:false,error:null};
+  if(cache.loading||(!force&&(cache.items||cache.error)))return;
+  cache.loading=true;
+  try {cache.items=(await api('/api/camera-controls',{id})).controls;cache.error=null;}
+  catch(error){cache.error=error.message;}
+  finally {cache.loading=false;if(dev?.id===id&&!showAll&&!showSettings)render();}
+}
+async function writeStandard(target,profile,control,value){
+  const id=target.id;
+  if(standardBusy.has(id))return toast('Wait for the current camera change.',true);
+  standardBusy.add(id);
+  try {
+    const response=await api('/api/camera',{id,profile,control,value});
+    const item=devices.find(device=>device.id===id);
+    if(item) {
+      const saved=response.device.profilesData[profile].camera.controls[control];
+      const data=item.profilesData[profile]||=(item.profilesData[profile]={});
+      (data.camera||=( {})).controls||={};data.camera.controls[control]=saved;
+      if(item.active===profile)item.profile=data;
+    }
+    if(response.controls)standardControls[id]={items:response.controls,loading:false,error:null};
+    else standardControls[id]=undefined;
+    if(previewWidget?.ownerId===id)previewWidget.controller.refresh();
+    if(dev?.id===id)toast('Changed on camera and saved.');
+  }catch(error){if(dev?.id===id)toast(error.message,true);}
+  finally {standardBusy.delete(id);if(dev?.id===id)render();}
+}
+function standardEditor(box,control){
+  const target=dev,profile=target.active,items=standardControls[target.id]?.items||[],info=items.find(item=>item.control===control);
+  if(!info){box.append(el('p',{className:'note',textContent:'Read camera controls first.'}));return;}
+  const view=SecbirdControls.model(info,items),range=info.range;
+  box.append(el('h3',{textContent:control.replaceAll('-',' ')}));
+  if(view.disabled){box.append(el('p',{className:'note',textContent:view.disabled}));return;}
+  const send=value=>writeStandard(target,profile,control,value);
+  if(info.kind==='toggle'||info.kind==='frequency') {
+    const input=el('select',{ariaLabel:control,disabled:view.manualDisabled});
+    input.append(new Option('Current value unknown','',false,!info.current));
+    SecbirdControls.options(info,standardControls[target.id]?.items||[]).forEach(choice=>input.append(new Option(choice.label,String(choice.value),false,info.current?.value===choice.value)));
+    input.onchange=()=>{if(input.value!=='')send(input.value);};box.append(input);
+  }else{
+    const input=el('input',{type:'number',min:range.min,max:range.max,step:range.step,value:info.current?.value??'',ariaLabel:control,disabled:view.manualDisabled});
+    const change=()=>{try{send(SecbirdControls.manualValue(info,input.value));}catch(error){toast(error.message,true);}};
+    input.onchange=change;
+    if(info.current&&range.manual){const slider=el('input',{type:'range',min:range.min,max:range.max,step:range.step,value:info.current.value,ariaLabel:control+' slider',disabled:view.manualDisabled});slider.oninput=()=>input.value=slider.value;slider.onchange=change;box.append(slider);}
+    box.append(input);
+    if(range.automatic){const auto=el('input',{type:'checkbox',checked:!!info.current?.automatic,ariaLabel:'Automatic '+control});auto.indeterminate=!info.current;auto.onchange=()=>{try{send(auto.checked?'auto':SecbirdControls.manualValue(info,input.value));}catch(error){auto.checked=!!info.current?.automatic;toast(error.message,true);}};box.append(el('label',{className:'row'},auto,'Auto'));}
+  }
+  box.append(el('p',{className:'note',textContent:`Driver range ${range.min}…${range.max}, step ${range.step}. Auto may change the live value.`}),
+    el('button',{className:'ghost',textContent:'Reset to driver default',disabled:view.defaultDisabled,onclick:()=>send('default')}));
+  if(view.prerequisite)box.append(el('p',{className:'note',textContent:view.prerequisite}));
+  if(control==='anti-flicker')box.append(el('p',{className:'note',textContent:'50/60 Hz is lighting anti-flicker, not video FPS.'}));
+  if(control==='focus')box.append(el('p',{className:'note',textContent:'Auto focus is separate from responsive/passive focus strategy.'}));
+  if(control==='low-light-compensation')box.append(el('p',{className:'note',textContent:'Requires Auto exposure; can lower the frame rate in dim light.'}));
+}
+
+// The browser owns video frames. Backend identities and browser source IDs are not
+// interchangeable: users explicitly select/confirm the source, including twins.
+let previewWidget = null;
+function discardCameraPreview() {
+  if (!previewWidget) return;
+  previewWidget.controller.stop();
+  previewWidget.root.remove();
+  previewWidget = null;
+}
+function mountCameraPreview(host) {
+  if (previewWidget && previewWidget.ownerId !== dev.id) discardCameraPreview();
+  if (!previewWidget) {
+    const ownerId = dev.id, root = el('div', { className: 'camera-preview' });
+    const video = el('video', { autoplay: true, muted: true, playsInline: true, ariaLabel: 'Live camera preview' });
+    const status = el('p', { className: 'note', role: 'status', ariaLive: 'polite', textContent: 'Preview stopped. Camera controls work without preview.' });
+    const source = el('select', { ariaLabel: 'Preview camera source' });
+    source.append(new Option('Choose the matching camera explicitly', ''));
+    const format = el('select', { ariaLabel: 'Preview resolution and FPS combination', disabled: true });
+    const start = el('button', { className: 'ghost', textContent: 'Start preview', disabled: true });
+    const stop = el('button', { className: 'ghost', textContent: 'Stop preview', disabled: true });
+    const permission = el('button', { className: 'ghost', textContent: 'Enable preview / list cameras' });
+    let lastFormat = '', changing = false;
+    const controller = SecbirdPreview.createPreview({mediaDevices: navigator.mediaDevices, video, onState(state) {
+      const active = state.state === 'playing', pending = state.state === 'starting';
+      start.disabled = !source.value || active || pending;
+      stop.disabled = !active && !pending;
+      format.disabled = !active || changing;
+      permission.disabled = active || pending;
+      source.disabled = active || pending;
+      status.textContent = state.error || (active ? `Actual preview: ${state.actual.width ?? '?'} × ${state.actual.height ?? '?'} at ${state.actual.frameRate ?? '?'} FPS` : pending ? 'Waiting for camera access…' : 'Preview stopped.');
+    }});
+    const fillFormats = () => {
+      format.replaceChildren(new Option('Browser default / actual shown below', ''));
+      for (const candidate of controller.formats()) {
+        const value = JSON.stringify(candidate);
+        format.append(new Option(`${candidate.width} × ${candidate.height} · ${candidate.frameRate} FPS (try combination)`, value));
+      }
+      if ([...format.options].some(option => option.value === lastFormat)) format.value = lastFormat;
+    };
+    permission.onclick = async () => {
+      permission.disabled = true;
+      status.textContent = 'Allow video camera permission, then explicitly select the source matching this device. No microphone is requested.';
+      try {
+        const devices = await controller.sources(true);
+        if (previewWidget?.ownerId !== ownerId) return;
+        source.replaceChildren(new Option('Choose the matching camera explicitly', ''));
+        devices.forEach((device, index) => source.append(new Option(`${device.label || 'Camera'} (${index + 1})`, device.deviceId)));
+        status.textContent = 'Select the Kiyo Pro you are configuring. Identical model names do not identify a physical unit.';
+      } catch (error) { status.textContent = error.message; }
+      finally { permission.disabled = false; }
+    };
+    source.onchange = () => { controller.stop(); start.disabled = !source.value; lastFormat = ''; fillFormats(); };
+    start.onclick = async () => {
+      try { await controller.start(source.value, null); fillFormats(); }
+      catch { /* controller publishes an actionable camera error */ }
+    };
+    stop.onclick = () => controller.stop();
+    format.onchange = async () => {
+      const requested = format.value;
+      changing = true; format.disabled = true;
+      try {
+        await controller.setFormat(requested ? JSON.parse(requested) : null);
+        lastFormat = requested;
+      } catch (error) { format.value = lastFormat; toast(error.message, true); }
+      finally { changing = false; format.disabled = controller.snapshot().state !== 'playing'; }
+    };
+    root.append(el('h3', { textContent: 'Live video preview' }),
+      el('p', { className: 'note', textContent: 'Optional video-only preview. It may conflict with OBS, Teams, or other camera apps. Resolution/FPS apply only here, not to those apps.' }),
+      el('div', { className: 'row' }, permission, source), video,
+      el('div', { className: 'row' }, start, stop, format), status);
+    previewWidget = {ownerId, root, controller};
+  }
+  host.append(previewWidget.root);
+  const video = previewWidget.root.querySelector('video');
+  if (previewWidget.controller.snapshot().state === 'playing') video.play().catch(() => previewWidget?.controller.stop());
+}
+window.addEventListener('pagehide', discardCameraPreview);
+document.addEventListener('visibilitychange', () => { if (document.hidden) discardCameraPreview(); });
 
 // The live profile's games and apps: while one is in front, this profile comes up.
 function appsEditor(box) {
@@ -1438,6 +1644,7 @@ function lightingControlEditor(box) {
 function deviceEditor(box) {
   const facts = el('dl', { className: 'facts' });
   [['Kind', KINDS[dev.kind] || 'Device'], ['Firmware', dev.firmware], ['Serial', dev.serial], ['Battery', dev.battery != null && dev.battery + '%'],
+   ['Camera identity (local; may contain serial)', dev.kind === 'webcam' && dev.id],
    ['Product id', dev.pid], ['Device list', dev.known ? 'Known model' : 'Not in the device database yet']]
     .filter(([, v]) => v).forEach(([k, v]) => facts.append(el('dt', { textContent: k }), el('dd', { className: 'num', textContent: v })));
   box.append(el('div', { className: 'edgroup' }, el('p', { className: 'lead', textContent: devLabel(dev) }), facts));
@@ -2246,41 +2453,59 @@ window.addEventListener('pointerup', () => painting = false);
 
 // ---------- Profiles ----------
 
+const profileActions = SecbirdProfiles.createProfileActions({api, update(id, device) {
+  const target = devices.find(candidate => candidate.id === id);
+  if (!target) return;
+  Object.assign(target, device);
+  target.profilesData = target.profilesData || {};
+  target.profile = target.profile || {};
+  target.profilesData[target.active] = target.profile;
+  if (target.kind === 'mouse') btnData[id] = undefined;
+  if (target.kind === 'webcam') loadStandardControls(id,true);
+}});
+
 async function activate(name, quiet) {
+  const target = dev;
   try {
-    const r = await api('/api/profile', { action: 'use', name });
-    adopt(r.device);
-    if (dev.kind === 'mouse') btnData[dev.id] = undefined; // the new profile's remaps; read again when shown
+    const r = await profileActions.activate(target, name);
+    if (!r || dev?.id !== target.id) return false;
+    dev = devices.find(candidate => candidate.id === target.id) || target;
     if (!quiet) sel = null;
     render();
     toast(r.failures.length ? 'Some settings failed: ' + r.failures.join('; ') : (quiet ? 'Switched to ' + name + ' to edit it' : name + ' is active'), r.failures.length > 0);
     return true;
-  } catch (err) { toast(err.message, true); render(); return false; }
+  } catch (err) { if (dev?.id === target.id) { toast(err.message, true); render(); } return false; }
 }
 async function createProfile(name) {
+  const target = dev;
   try {
-    await api('/api/profile', { action: 'new', name });
-    await activate(name, true);
+    const r = await profileActions.create(target, name);
+    if (!r || dev?.id !== target.id) return;
+    dev = devices.find(candidate => candidate.id === target.id) || target;
+    sel = null; render();
     toast('Created ' + name + ' (a copy of the previous profile)');
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { if (dev?.id === target.id) toast(err.message, true); }
 }
 async function deleteProfile(name) {
+  const target = dev;
   const other = name === dev.active ? dev.profiles.find(p => p !== name) : null;
   if (!confirm(`Delete the profile "${name}"?` + (other ? ` "${other}" becomes active.` : ' Games tied to it go back to the active profile.'))) return;
   try {
-    if (other) await api('/api/profile', { action: 'use', name: other });
-    const r = await api('/api/profile', { action: 'delete', name }); adopt(r.device);
-    if (other && dev.kind === 'mouse') btnData[dev.id] = undefined;
+    const r = await profileActions.remove(target, name);
+    if (!r || dev?.id !== target.id) return;
+    dev = devices.find(candidate => candidate.id === target.id) || target;
     sel = null; render(); toast('Deleted ' + name);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { if (dev?.id === target.id) toast(err.message, true); }
 }
 async function saveApps(name, apps, msg) {
+  const target = dev;
   try {
-    const r = await api('/api/profile', { action: 'apps', name, apps });
-    adopt(r.device);
+    const r = await profileActions.setApps(target, name, apps);
+    if (!r || dev?.id !== target.id) return;
+    dev = devices.find(candidate => candidate.id === target.id) || target;
     // The response carries every profile, so a game that moved between profiles shows everywhere.
     render(); toast(msg);
-  } catch (err) { toast(err.message, true); }
+  } catch (err) { if (dev?.id === target.id) toast(err.message, true); }
 }
 
 // ---------- Settings ----------
@@ -2512,6 +2737,16 @@ async function pollLive() {
   if (document.hidden) return;
   try {
     const r = await api('/api/live');
+    const cameras = r.cameras || [], oldCameras = devices.filter(d => d.kind === 'webcam');
+    if (JSON.stringify(cameras.map(d => d.id)) !== JSON.stringify(oldCameras.map(d => d.id))) {
+      await load();
+    } else for (const camera of cameras) {
+      const target = devices.find(d => d.id === camera.id);
+      if (target && JSON.stringify(target.profilesData) !== JSON.stringify(camera.profilesData) || target && target.active !== camera.active) {
+        Object.assign(target, camera);
+        if (dev?.id === target.id) { dev = target; render(); }
+      }
+    }
     if (liveSeq !== null && r.seq !== liveSeq) {
       for (const d of devices) {
         const v = r.dpi[d.id];
@@ -2531,6 +2766,7 @@ async function load(path = '/api/state', body) {
   try {
     const s = body ? await api(path, body) : await api(path);
     devices = s.devices; unsupported = s.unsupported || []; synapse = s.synapse || [];
+    if (s.camera_error) toast('Camera discovery: ' + s.camera_error, true);
     devices.forEach(d => { d.profile = d.profile || {}; d.profilesData = d.profilesData || {}; d.profilesData[d.active] = d.profile; });
     if (s.version) $('home').title = 'Secretarybird ' + s.version + ': all devices';
     const want = new URLSearchParams(location.search).get('d');
