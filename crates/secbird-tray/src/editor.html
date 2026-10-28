@@ -227,7 +227,11 @@
   .chips5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); gap: 6px; }
   .chips5 .pill { border-radius: 8px; padding: 7px 0; text-align: center; }
   .chips5 .pill[aria-pressed=true] { background: var(--fill); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
-  #stageRows .dpi { font-size: 17px; width: 84px; }
+  .stage-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .stage-values { display: flex; gap: 8px; min-width: 0; }
+  .stage-values label { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; }
+  #stageRows .dpi { display: block; font-size: 17px; width: 100%; }
+  .stage-use { grid-column: 2; }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; }
   .pill { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; cursor: pointer; color: var(--muted); }
   .pill:hover { color: var(--text); }
@@ -896,7 +900,7 @@ function railSummary(s) {
     box.append(fx ? effectLabel(fx) : lit.length === 1 ? '#' + lit[0].color : lit.length ? plural(lit.length, 'zone') + ' lit' : 'Off');
     return box;
   }
-  if (s.id === 'sens') return [dev.dpi && dev.dpi.x + ' DPI', dev.polling && hz(dev.polling.hz)].filter(Boolean).join(' · ');
+  if (s.id === 'sens') return [dev.dpi && dpiLabel(dev.dpi) + ' DPI', dev.polling && hz(dev.polling.hz)].filter(Boolean).join(' · ');
   if (s.id === 'buttons') {
     const n = Object.keys(p.buttons || {}).length;
     return n ? plural(n, isBoard() ? 'key' : 'button') + ' changed' : 'As saved in the ' + holder();
@@ -1650,34 +1654,64 @@ function stopFinding(closing) {
 }
 window.addEventListener('pagehide', () => stopFinding(true));
 
+// Linking is an editing choice, not a firmware setting. Toggling it never writes DPI.
+// Start with independent axes so opening the editor cannot erase an existing X/Y pair.
+const dpiLinked = new Map();
+function dpiLinkControl() {
+  const id = dev.id;
+  return el('div', { className: 'edgroup' },
+    el('label', { className: 'row' }, el('input', { type: 'checkbox', checked: dpiLinked.get(id) === true,
+      ariaLabel: 'Link X/Y axes', onchange: e => dpiLinked.set(id, e.target.checked) }), 'Link X/Y axes'),
+    el('p', { className: 'note', textContent: 'X is horizontal; Y is vertical. When linked, editing either axis sets both. Switching this option keeps the current values.' }));
+}
+function dpiLabel(d) { return d.x === d.y ? String(d.x) : d.x + ' × ' + d.y; }
+function dpiPair(current, value, axis, linked, range) {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const v = Math.min(range.max, Math.max(range.min, n));
+  if (!axis || linked) return [v, v];
+  return axis === 'x' ? [v, current[1]] : [current[0], v];
+}
 function dpiEditor(box) {
   const d = dev.dpi, step = Math.max(d.step || 50, 50);
-  const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step, value: d.x, ariaLabel: 'DPI', id: 'dpiNum' });
-  const slider = el('input', { type: 'range', min: d.min, max: d.max, step: d.step, value: d.x, ariaLabel: 'DPI slider', id: 'dpiSlider' });
+  const fmt = n => n.toLocaleString('en-US');
+  box.append(dpiLinkControl());
+  for (const axis of ['x', 'y']) {
+    const upper = axis.toUpperCase();
+    const axisLabel = axis === 'x' ? 'X-axis DPI' : 'Y-axis DPI';
+    const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step,
+      value: d[axis], ariaLabel: axisLabel, id: 'dpiNum' + upper });
+    const slider = el('input', { type: 'range', min: d.min, max: d.max, step: d.step, value: d[axis],
+      ariaLabel: axis === 'x' ? 'X-axis DPI slider' : 'Y-axis DPI slider', id: 'dpiSlider' + upper });
+    num.oninput = () => { num.dataset.dirty = '1'; };
+    num.onchange = e => { delete num.dataset.dirty; if (!setDpi(e.target.value, axis)) showDpi(); };
+    num.onkeydown = e => { if (e.key === 'Enter') num.blur(); };
+    slider.oninput = e => setDpi(e.target.value, axis);
+    // - / + move to the next multiple of the step, within the range.
+    const nudge = dir => setDpi((Math.round((+num.value || dev.dpi[axis]) / step) + dir) * step, axis);
+    const stepBtn = (dir, ic, label) => el('button', { className: 'step', innerHTML: icon(ic), ariaLabel: label,
+      title: label + ' (' + step + ')', onclick: () => nudge(dir) });
+    box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: axis === 'x' ? 'X axis (horizontal)' : 'Y axis (vertical)' }),
+      el('div', { className: 'readout' }, stepBtn(-1, 'minus', `Lower ${upper} DPI`),
+        el('label', {}, num, el('span', { className: 'unit', textContent: 'DPI' })), stepBtn(1, 'plus', `Higher ${upper} DPI`)),
+      el('div', { className: 'scale' }, slider, el('div', { className: 'ends num', ariaHidden: 'true' },
+        el('span', { textContent: fmt(d.min) }), el('span', { textContent: fmt(d.max) })))));
+  }
   const pills = el('div', { className: 'chips5', id: 'dpiPills', role: 'group', ariaLabel: 'DPI presets' });
   [400, 800, 1600, 3200, 6400].filter(v => v >= d.min && v <= d.max).forEach(v =>
-    pills.append(el('button', { className: 'pill num', textContent: v, ariaPressed: v === d.x, onclick: () => setDpi(v) })));
-  num.oninput = () => { num.dataset.dirty = '1'; };
-  num.onchange = e => { delete num.dataset.dirty; setDpi(e.target.value); };
-  num.onkeydown = e => { if (e.key === 'Enter') num.blur(); };
-  slider.oninput = e => setDpi(e.target.value);
-  // - / + move to the next multiple of the step, within the range.
-  const nudge = dir => setDpi(Math.min(d.max, Math.max(d.min, (Math.round((+num.value || dev.dpi.x) / step) + dir) * step)));
-  const stepBtn = (dir, ic, label) => el('button', { className: 'step', innerHTML: icon(ic), ariaLabel: label, title: label + ' (' + step + ')', onclick: () => nudge(dir) });
-  const fmt = n => n.toLocaleString('en-US');
+    pills.append(el('button', { className: 'pill num', textContent: v, ariaPressed: v === d.x && v === d.y, onclick: () => setDpi(v) })));
   box.append(
-    el('div', { className: 'readout' }, stepBtn(-1, 'minus', 'Lower DPI'),
-      el('label', {}, num, el('span', { className: 'unit', textContent: 'DPI' })), stepBtn(1, 'plus', 'Higher DPI')),
-    el('div', { className: 'scale' }, slider, el('div', { className: 'ends num', ariaHidden: 'true' }, el('span', { textContent: fmt(d.min) }), el('span', { textContent: fmt(d.max) }))),
-    pills.childElementCount ? el('div', { className: 'edgroup' }, el('h3', { textContent: 'Presets' }), pills) : '',
+    pills.childElementCount ? el('div', { className: 'edgroup' }, el('h3', { textContent: 'Presets (both axes)' }), pills) : '',
     el('p', { className: 'note', textContent: 'The DPI button on the mouse changes this too; this follows it.' }));
 }
 function showDpi() { // the mouse changed DPI by itself
   refreshCell('dpi'); refreshCell('stages');
-  const n = $('dpiNum'), s = $('dpiSlider');
-  if (n && !n.dataset.dirty) n.value = dev.dpi.x; // follow the mouse unless a new value is being typed
-  if (s && document.activeElement !== s) s.value = dev.dpi.x;
-  document.querySelectorAll('#dpiPills .pill').forEach(p => p.ariaPressed = +p.textContent === dev.dpi.x);
+  for (const axis of ['x', 'y']) {
+    const n = $('dpiNum' + axis.toUpperCase()), s = $('dpiSlider' + axis.toUpperCase());
+    if (n && !n.dataset.dirty) n.value = dev.dpi[axis]; // don't overwrite a value being typed
+    if (s && document.activeElement !== s) s.value = dev.dpi[axis];
+  }
+  document.querySelectorAll('#dpiPills .pill').forEach(p => p.ariaPressed = +p.textContent === dev.dpi.x && +p.textContent === dev.dpi.y);
 }
 
 function pollingEditor(box) {
@@ -1704,40 +1738,55 @@ function stagesOf(name) {
 }
 
 function stagesEditor(box) {
-  const d = dev.dpi || { min: 100, max: 30000, step: 50 };
-  const st = stagesOf(dev.active), list = st.list.map(v => v.slice());
+  const target = dev, profile = target.profile;
+  const d = target.dpi || { min: 100, max: 30000, step: 50 };
+  const st = stagesOf(target.active), list = st.list.map(v => v.slice());
   let active = st.active;
   const rowsBox = el('div', { className: 'edgroup', id: 'stageRows' });
-  const add = el('button', { className: 'ghost', innerHTML: icon('plus') + 'Add stage' });
+  const add = el('button', { className: 'ghost', innerHTML: icon('plus') + 'Add stage', ariaLabel: 'Add stage' });
   const draw = () => {
     rowsBox.innerHTML = '';
     list.forEach((v, i) => {
-      const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step, value: v[0],
-        ariaLabel: 'Stage ' + (i + 1) + ' DPI', onchange: e => { const n = Math.round(+e.target.value); if (n) { list[i] = [n, n]; save(); } } });
+      const values = el('div', { className: 'stage-values' });
+      for (const [at, axis] of ['x', 'y'].entries()) {
+        const upper = axis.toUpperCase();
+        const num = el('input', { type: 'number', className: 'dpi num', min: d.min, max: d.max, step: d.step, value: v[at],
+          ariaLabel: `Stage ${i + 1} ${upper} DPI`, onchange: e => {
+            const pair = dpiPair(list[i], e.target.value, axis, dpiLinked.get(target.id) === true, d);
+            if (pair) { list[i] = pair; save(); } else draw();
+          } });
+        values.append(el('label', {}, upper, num));
+      }
       const use = el('input', { type: 'radio', name: 'stageUse', checked: i + 1 === active, id: 'stageUse' + i,
         onchange: () => { active = i + 1; save(); } });
       const del = el('button', { className: 'ghost', innerHTML: icon('x'), title: 'Remove stage ' + (i + 1), ariaLabel: 'Remove stage ' + (i + 1),
         disabled: list.length === 1, onclick: () => { list.splice(i, 1); if (active > i + 1 || active > list.length) active = Math.max(1, active - 1); save(); } });
-      rowsBox.append(el('div', { className: 'row' }, el('span', { className: 'val num', textContent: i + 1 }), num, use,
-        el('label', { htmlFor: 'stageUse' + i, textContent: 'In use' }), del));
+      rowsBox.append(el('div', { className: 'stage-row' }, el('span', { className: 'val num', textContent: i + 1 }), values, del,
+        el('label', { className: 'row stage-use' }, use, 'In use')));
     });
-    add.disabled = list.length >= dev.stages.max;
+    add.disabled = list.length >= target.stages.max;
   };
-  add.onclick = () => { const next = Math.min(d.max, list[list.length - 1][0] * 2); list.push([next, next]); save(); };
+  add.onclick = () => { list.push(list[list.length - 1].map(v => Math.min(d.max, v * 2))); save(); };
+  let revision = 0;
   const save = async () => {
+    const current = ++revision;
     draw();
     try {
-      const r = await api('/api/stages', { active, stages: list });
-      dev.stages.list = r.stages.list; dev.stages.active = r.stages.active;
-      dev.profile.dpi_stages = { active: r.stages.active, stages: r.stages.list };
-      if (dev.dpi) { dev.dpi.x = r.dpi[0]; dev.dpi.y = r.dpi[1]; dev.profile.dpi = r.dpi; }
+      const r = await api('/api/stages', { id: target.id, active, stages: list });
+      if (current !== revision) return;
+      target.stages.list = r.stages.list; target.stages.active = r.stages.active;
+      profile.dpi_stages = { active: r.stages.active, stages: r.stages.list };
+      if (target.dpi) { target.dpi.x = r.dpi[0]; target.dpi.y = r.dpi[1]; profile.dpi = r.dpi; }
       r.stages.list.forEach((v, i) => { list[i] = v.slice(); });
-      draw(); refreshCell('stages'); refreshCell('dpi');
-      toast('DPI stages · saved to ' + dev.active);
+      draw();
+      if (dev === target) {
+        refreshCell('stages'); refreshCell('dpi');
+        toast('DPI stages · saved to ' + target.active);
+      }
     } catch (e) { toast(e.message, true); }
   };
   draw();
-  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Stages the DPI button cycles through' }), rowsBox, el('div', { className: 'row' }, add)),
+  box.append(dpiLinkControl(), el('div', { className: 'edgroup' }, el('h3', { textContent: 'Stages the DPI button cycles through' }), rowsBox, el('div', { className: 'row' }, add)),
     el('p', { className: 'note', textContent: 'Up to ' + dev.stages.max + ' stages, stored on the mouse. The stage in use sets the DPI right away.' }));
 }
 
@@ -2193,13 +2242,43 @@ async function copyToZones(src) {
   toast(name + (all ? ' stays on ' + label(src) + ': the other zones can’t run it' : ' on all zones' + (skipped.length ? '. ' + skipped.join(', ') + ' can’t run it' : '')), all);
 }
 const sendBright = live(([name, value]) => api('/api/brightness', { zone: name, value }));
-const sendDpi = live(v => api('/api/dpi', { x: v, y: v }).then(r => { dev.dpi.x = dev.dpi.y = r.dpi[0]; dev.profile.dpi = r.dpi; refreshCell('dpi'); }));
-function setDpi(v) {
-  v = Math.round(Number(v)); if (!v) return;
-  const n = $('dpiNum'), s = $('dpiSlider');
-  if (n) n.value = v; if (s) s.value = v;
-  document.querySelectorAll('#dpiPills .pill').forEach(p => p.ariaPressed = +p.textContent === v);
-  sendDpi(v);
+const dpiSenders = new WeakMap();
+function setDpi(value, axis) {
+  const target = dev, profile = target.profile;
+  const previous = [target.dpi.x, target.dpi.y];
+  const pair = dpiPair(previous, value, axis, dpiLinked.get(target.id) === true, target.dpi);
+  if (!pair) return false;
+  // Keep pending edits to the other axis when moving between controls quickly.
+  target.dpi.x = pair[0]; target.dpi.y = pair[1];
+  showDpi();
+  let state = dpiSenders.get(target);
+  if (!state) {
+    state = { revision: 0, confirmed: previous, pending: false };
+    state.send = live(async ({ pair, revision, profile }) => {
+      let r;
+      try { r = await api('/api/dpi', { id: target.id, x: pair[0], y: pair[1] }); }
+      catch (error) {
+        if (revision === state.revision) {
+          target.dpi.x = state.confirmed[0]; target.dpi.y = state.confirmed[1];
+          profile.dpi = state.confirmed;
+          state.pending = false;
+          if (dev === target) showDpi();
+        }
+        throw error;
+      }
+      state.confirmed = r.dpi;
+      if (revision === state.revision) {
+        target.dpi.x = r.dpi[0]; target.dpi.y = r.dpi[1]; profile.dpi = r.dpi;
+        state.pending = false;
+        if (dev === target) showDpi();
+      }
+    }, () => dev === target ? 'Saved to ' + target.active : null);
+    dpiSenders.set(target, state);
+  }
+  if (!state.pending) state.confirmed = previous;
+  state.pending = true;
+  state.send({ pair, revision: ++state.revision, profile });
+  return true;
 }
 
 // Colors on the keys: painted keys, else the whole-keyboard color, else off.
@@ -2475,7 +2554,7 @@ function renderOverview() {
     const p = d.profile || {}, keys = p.keys, perKey = keys && keys.length;
     const colors = perKey ? [...new Set(keys.filter(k => k !== '000000'))].slice(0, 8).map(k => ({ color: k })) : d.leds.map(l => zoneOf(p, l.name));
     if (d.lighting_control) colors.forEach(z => { const i = el('i'), paint = zonePaint(z); if (paint) i.style.background = paint; else i.className = 'off'; dots.append(i); });
-    const stats = [d.dpi && ['DPI', d.dpi.x], d.polling && ['Polling', hz(d.polling.hz)], perKey && ['Lighting', 'Per-key']].filter(Boolean);
+    const stats = [d.dpi && ['DPI', dpiLabel(d.dpi)], d.polling && ['Polling', hz(d.polling.hz)], perKey && ['Lighting', 'Per-key']].filter(Boolean);
     if (!stats.length) stats.push(['Lighting', d.lighting_control ? plural(d.leds.length, 'zone') : (d.leds.length || d.matrix ? 'Not controlled' : 'None'), 'quiet']);
     const foot = el('div', { className: 'dfoot' },
       el('div', { className: 'dstats num' }, ...stats.map(([label, value, quiet]) => el('div', {}, el('small', { textContent: label }), el('b', { className: quiet || '', textContent: value })))),

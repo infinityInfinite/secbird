@@ -96,6 +96,10 @@ one at a time. Bug reports from Linux are very welcome, with `secbird report` ou
 
 ## Using it
 
+Mouse DPI and DPI stages can be edited independently for the X (horizontal) and Y
+(vertical) axes. **Link X/Y axes** makes subsequent edits apply to both; toggling
+it alone keeps the current values. DPI presets explicitly apply to both axes.
+
 ![A Naga with six profiles side by side in Compare](docs/mouse.png)
 
 | Naga side grid, a button playing a macro | Keyboard, per-key |
@@ -268,6 +272,12 @@ Settings live in `%APPDATA%\Secretarybird` (on Linux, `~/.config/secretarybird`)
 override. The tray menu has **Open settings folder**.
 
 ## Build from source
+
+The editor tests use Node.js's built-in test runner (no npm packages):
+
+```sh
+node --test crates/secbird-tray/tests/*.test.cjs
+```
 
 Needs Rust (stable, MSVC) on Windows 10/11.
 
