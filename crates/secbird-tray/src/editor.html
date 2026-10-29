@@ -524,7 +524,7 @@ const KINDS = { mouse: 'Mouse', keyboard: 'Keyboard', laptop: 'Laptop', keypad: 
   headset: 'Headset', accessory: 'Accessory', unknown: 'Device' };
 let devices = [], unsupported = [], synapse = [], dev = null, showAll = null;
 let sel = null, section = null, view = 'work'; // selected tile, rail section, 'work' or 'compare'
-let btnFailed = {}, btnData = {}, btnUnread = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
+let btnFailed = {}, btnData = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
 
 // Full-size ANSI keyboard on Razer's 6 x 22 per-key grid.
 // Each key: [label, matrix column, width, gap before, height], in key units.
@@ -1126,8 +1126,9 @@ function keyTiles(t, cur) {
 }
 
 // Mice drawn on the Buttons page, by product id, so each button can be found on the mouse;
-// others get tiles only. Per button: [where it is, a line about it]. The drawing marks each
-// button with data-btn: seen from above (front at the top) and from below, not to scale.
+// others get tiles only. Per button: [where it is, a line about it, and for a button that can't
+// be remapped, why]. The drawing marks each button with data-btn: seen from above (front at
+// the top) and from below, not to scale.
 const MOUSE_BODY = 'M150 24C186 22 216 34 224 64C232 100 238 160 238 210C238 270 232 330 214 362C198 388 170 398 146 396C116 394 84 382 66 360'
   + 'C50 342 40 318 44 296C48 282 58 276 66 268C74 258 76 240 76 220C76 180 74 130 76 96C78 60 92 34 116 27C128 24 140 24 150 24Z';
 const BASILISK_V4_HS = {
@@ -1139,7 +1140,8 @@ const BASILISK_V4_HS = {
     'scroll-down': ['Wheel, roll down', 'Rolling the scroll wheel toward you.'],
     'tilt-left': ['Wheel, tilt left', 'Pushing the scroll wheel to the left.'],
     'tilt-right': ['Wheel, tilt right', 'Pushing the scroll wheel to the right.'],
-    'wheel-mode': ['Behind the wheel (scroll mode)', 'The small button just behind the scroll wheel. It switches the wheel between tactile and free-spin.'],
+    'wheel-mode': ['Behind the wheel (scroll mode)', 'The small button just behind the scroll wheel. It switches the wheel between tactile and free-spin.',
+      'it’s a mechanical switch that frees the wheel, so there’s nothing to remap'],
     hypershift: ['Side trigger (HyperShift)', 'The trigger at the front of the thumb side, below the left button.'],
     'side-extra': ['Side, front (extra button)', 'The front one of the three buttons on the thumb side.'],
     'side-forward': ['Side, middle (Mouse 5)', 'The middle one of the three buttons on the thumb side. Forward from the factory.'],
@@ -1214,8 +1216,7 @@ function mouseTiles(t, cur, d) {
 // Why a drawn button has no tile.
 function missingButton(name) {
   if ((btnData[dev.id] || []).some(b => b.name === name)) return 'it has no HyperShift setting';
-  if ((btnUnread[dev.id] || []).includes(name)) return 'the mouse lists it, but won’t let software read or change it';
-  return 'the mouse doesn’t offer it for remapping';
+  return (buttonPlace(name) || [])[2] || 'the mouse doesn’t offer it for remapping';
 }
 
 function tile(r, short) {
@@ -2078,7 +2079,7 @@ async function loadButtons(d, force) {
   if (dev && dev.id === d.id && !showAll) renderSheet();
   try {
     const r = await api('/api/buttons', { id: d.id });
-    btnData[d.id] = r.buttons; onboardData[d.id] = r.onboard; btnUnread[d.id] = r.unreadable || []; delete btnFailed[d.id];
+    btnData[d.id] = r.buttons; onboardData[d.id] = r.onboard; delete btnFailed[d.id];
   } catch { btnData[d.id] = []; btnFailed[d.id] = true; }
   if (dev && dev.id === d.id && !showAll) renderSheet();
 }
