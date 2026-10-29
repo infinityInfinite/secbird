@@ -856,17 +856,34 @@ impl Device {
     /// answer for buttons it doesn't have). Takes a moment; call it when the buttons are
     /// about to be shown.
     pub fn buttons(&self) -> Vec<(u8, Action)> {
+        self.button_list().0
+    }
+
+    /// [`Device::buttons`], and the ids the mouse lists that don't answer a read: buttons it
+    /// has but won't let software read or change. Only from the mouse's own list; empty
+    /// when it has none.
+    pub fn button_list(&self) -> (Vec<(u8, Action)>, Vec<u8>) {
         if !matches!(self.spec.as_ref().map(|s| s.kind), Some(crate::Kind::Mouse)) {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
-        let ids = self.button_ids().unwrap_or_else(|| {
+        let listed = self.button_ids();
+        let from_list = listed.is_some();
+        let ids = listed.unwrap_or_else(|| {
             // Without the mouse's list, only a Naga (or a docked mouse we can't name) gets
             // the side-plate buttons.
             let name = self.spec.as_ref().map_or("", |s| s.name.as_str());
             let plates = name.contains("Naga") || name.starts_with("Mouse on");
             BUTTONS.iter().map(|b| b.0).filter(|id| plates || !(64..=86).contains(id)).collect()
         });
-        ids.into_iter().filter_map(|id| self.button(id, Layer::Normal).ok().map(|a| (id, a))).collect()
+        let (mut found, mut unread) = (Vec::new(), Vec::new());
+        for id in ids {
+            match self.button(id, Layer::Normal) {
+                Ok(a) => found.push((id, a)),
+                Err(_) if from_list => unread.push(id),
+                Err(_) => {}
+            }
+        }
+        (found, unread)
     }
 }
 

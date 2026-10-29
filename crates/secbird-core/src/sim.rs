@@ -1387,6 +1387,13 @@ mod tests {
         assert_eq!(ids, [1, 2, 15, 0x34, 120]);
         assert_eq!(crate::buttons::button_name(120), "button-120");
         assert_eq!(crate::buttons::button_id("button-120"), Some(120));
+
+        // A listed button that doesn't answer a read is left out, and reported.
+        sim.state().button_list = Some(vec![1, 2, 106]);
+        sim.state().buttons.remove(&(0, 106, 0));
+        let (found, unread) = dev.button_list();
+        assert_eq!(found.iter().map(|b| b.0).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(unread, [106]);
     }
 
     #[test]

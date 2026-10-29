@@ -157,6 +157,28 @@
   .keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 168px)); gap: 6px; }
   .keypad .tile { min-height: 52px; padding: 6px 10px 7px; }
   .keypad .tl { color: var(--value); font-weight: 650; font-size: 13px; }
+  /* A drawn mouse: the drawing beside the tiles; pointing at either lights up the other. */
+  .mousewrap { display: flex; flex-wrap: wrap; gap: 16px 22px; align-items: flex-start; }
+  .mousepic { flex: 0 1 330px; min-width: 240px; }
+  .mousepic svg { display: block; width: 100%; height: auto; user-select: none; -webkit-user-select: none; }
+  .mouseside { flex: 1 1 360px; min-width: 0; display: grid; gap: 12px; }
+  .mousepic .body { fill: var(--body-fill); stroke: var(--body-stroke); stroke-width: 1.5; }
+  .mousepic .shape { fill: var(--button-fill); stroke: var(--body-stroke); stroke-width: 1.2; transition: fill .12s, stroke .12s; }
+  .mousepic .arrow .shape { fill: var(--faint); stroke: none; }
+  .mousepic .hit { fill: transparent; }
+  .mousepic .deco { fill: none; stroke: var(--body-stroke); stroke-width: 1; pointer-events: none; }
+  .mousepic text { fill: var(--muted); font-size: 12px; text-anchor: middle; pointer-events: none; }
+  .mousepic .under .body, .mousepic .under .shape, .mousepic .under .deco { vector-effect: non-scaling-stroke; }
+  .mousepic g[data-row] { cursor: pointer; outline: none; }
+  .mousepic g.changed .shape { stroke: var(--accent); }
+  .mousepic g.changed.arrow .shape { fill: var(--accent-text); }
+  .mousepic g[data-row]:hover .shape, .mousepic g.hot .shape { fill: var(--lit); stroke: var(--lit-edge); stroke-width: 2; }
+  .mousepic g.arrow[data-row]:hover .shape, .mousepic g.arrow.hot .shape { fill: var(--lit-edge); }
+  .mousepic g[aria-pressed=true] .shape, .mousepic g[data-row]:focus-visible .shape { fill: var(--fill); stroke: var(--accent); stroke-width: 2.4; }
+  .mousepic g.none { opacity: .45; }
+  .mousepic g.none .shape { fill: none; stroke: var(--muted); stroke-dasharray: 3 2.5; }
+  .tile.hot { border-color: var(--lit-edge); }
+  @media (max-width: 820px) { .mousepic { flex-basis: 100%; max-width: 340px; margin: 0 auto; } }
   .skel { height: 62px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .55; } }
   @media (prefers-reduced-motion: reduce) { .uline { transition: none; } .skel { animation: none; } }
@@ -502,7 +524,7 @@ const KINDS = { mouse: 'Mouse', keyboard: 'Keyboard', laptop: 'Laptop', keypad: 
   headset: 'Headset', accessory: 'Accessory', unknown: 'Device' };
 let devices = [], unsupported = [], synapse = [], dev = null, showAll = null;
 let sel = null, section = null, view = 'work'; // selected tile, rail section, 'work' or 'compare'
-let btnFailed = {}, btnData = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
+let btnFailed = {}, btnData = {}, btnUnread = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
 
 // Full-size ANSI keyboard on Razer's 6 x 22 per-key grid.
 // Each key: [label, matrix column, width, gap before, height], in key units.
@@ -865,8 +887,12 @@ function sections() {
   if (sens.length) s.push({ id: 'sens', name: 'Sensitivity', rows: sens });
   if (dev.kind === 'mouse' || isBoard()) {
     const list = btnData[dev.id];
+    // A drawn mouse names each button by where it is, in the drawing's order.
+    const order = Object.keys((drawing() || {}).buttons || {});
+    const rank = b => { const i = order.indexOf(b.name); return i < 0 ? order.length : i; };
     s.push({ id: 'buttons', name: isBoard() ? 'Keys' : 'Buttons', tools: 'layer', loading: !list,
-      rows: [...(list || []).filter(b => b[btnLayer] != null).map(b => ({ key: 'btn:' + b.name, label: b.label, name: b.name })),
+      rows: [...(list || []).filter(b => b[btnLayer] != null).sort((a, b) => rank(a) - rank(b))
+        .map(b => ({ key: 'btn:' + b.name, label: (buttonPlace(b.name) || [b.label])[0], name: b.name })),
         ...(list && list.length && !isBoard() ? [{ key: 'onboard', label: 'Saved on the mouse' }] : [])] });
   }
   if (dev.macros) s.push({ id: 'macros', name: 'Macros', rows: [{ key: 'macros', label: 'Macros on the device' }] });
@@ -989,6 +1015,7 @@ function renderTiles(cur) {
     return;
   }
   if (cur.id === 'buttons' && isBoard()) return keyTiles(t, cur);
+  if (cur.id === 'buttons' && drawing() && cur.rows.length) return mouseTiles(t, cur, drawing());
   // Side plates (Naga) are drawn as keypads, the way they sit on the mouse.
   const plain = cur.rows.filter(r => !/^btn:(grid|hex)-/.test(r.key));
   const grid = cur.rows.filter(r => /^btn:grid-/.test(r.key));
@@ -1098,6 +1125,99 @@ function keyTiles(t, cur) {
   t.append(el('details', { className: 'morekeys', open }, el('summary', { className: 'subhead', textContent: `${plural(rest.length, 'more key')}, not on the drawing` }), g));
 }
 
+// Mice drawn on the Buttons page, by product id, so each button can be found on the mouse;
+// others get tiles only. Per button: [where it is, a line about it]. The drawing marks each
+// button with data-btn: seen from above (front at the top) and from below, not to scale.
+const MOUSE_BODY = 'M150 24C186 22 216 34 224 64C232 100 238 160 238 210C238 270 232 330 214 362C198 388 170 398 146 396C116 394 84 382 66 360'
+  + 'C50 342 40 318 44 296C48 282 58 276 66 268C74 258 76 240 76 220C76 180 74 130 76 96C78 60 92 34 116 27C128 24 140 24 150 24Z';
+const BASILISK_V4_HS = {
+  buttons: {
+    left: ['Left button', 'The main button under your index finger.'],
+    right: ['Right button', 'The main button under your middle finger.'],
+    'scroll-up': ['Wheel, roll up', 'Rolling the scroll wheel away from you.'],
+    wheel: ['Wheel, press', 'Pressing down on the scroll wheel.'],
+    'scroll-down': ['Wheel, roll down', 'Rolling the scroll wheel toward you.'],
+    'tilt-left': ['Wheel, tilt left', 'Pushing the scroll wheel to the left.'],
+    'tilt-right': ['Wheel, tilt right', 'Pushing the scroll wheel to the right.'],
+    'wheel-mode': ['Behind the wheel (scroll mode)', 'The small button just behind the scroll wheel. It switches the wheel between tactile and free-spin.'],
+    hypershift: ['Side trigger (HyperShift)', 'The trigger at the front of the thumb side, below the left button.'],
+    'side-extra': ['Side, front (extra button)', 'The front one of the three buttons on the thumb side.'],
+    'side-forward': ['Side, middle (Mouse 5)', 'The middle one of the three buttons on the thumb side. Forward from the factory.'],
+    'side-back': ['Side, rear (Mouse 4)', 'The rear one of the three buttons on the thumb side, nearest your palm. Back from the factory.'],
+    profile: ['Underside (profile button)', 'The button on the bottom of the mouse.'],
+  },
+  svg: `<svg viewBox="0 0 350 422" role="group" aria-label="The mouse from above and from below: pick a button">
+    <path class="body" d="${MOUSE_BODY}"/>
+    <g data-btn="left"><path class="shape" d="M141 28V230C118 240 96 245 79 241C79 200 77 140 79 98C81 64 94 39 117 31C126 29 134 28 141 28Z"/></g>
+    <g data-btn="right"><path class="shape" d="M159 28C186 27 212 37 220 65C226 92 231 140 233 176C222 184 190 196 159 204Z"/></g>
+    <g data-btn="wheel-mode"><rect class="hit" x="140" y="172" width="20" height="34"/><rect class="shape" x="143" y="176" width="14" height="26" rx="5"/></g>
+    <g data-btn="wheel"><rect class="shape" x="142.5" y="84" width="15" height="64" rx="7.5"/><path class="deco" d="M146 92h8M146 99h8M146 106h8M146 113h8M146 120h8M146 127h8M146 134h8M146 141h8"/></g>
+    <g data-btn="scroll-up" class="arrow"><rect class="hit" x="138" y="58" width="24" height="24"/><path class="shape" d="M150 67l7 9h-14z"/></g>
+    <g data-btn="scroll-down" class="arrow"><rect class="hit" x="138" y="150" width="24" height="22"/><path class="shape" d="M150 166l7-9h-14z"/></g>
+    <g data-btn="tilt-left" class="arrow"><rect class="hit" x="122" y="104" width="18" height="26"/><path class="shape" d="M128 117l9-7v14z"/></g>
+    <g data-btn="tilt-right" class="arrow"><rect class="hit" x="160" y="104" width="18" height="26"/><path class="shape" d="M172 117l-9-7v14z"/></g>
+    <g data-btn="hypershift"><path class="shape" d="M78 117C63 116 54 125 54 134C54 143 63 152 78 151Z"/></g>
+    <g data-btn="side-extra"><rect class="shape" x="63" y="158" width="16" height="25" rx="6"/></g>
+    <g data-btn="side-forward"><rect class="shape" x="63" y="189" width="16" height="33" rx="7"/></g>
+    <g data-btn="side-back"><rect class="shape" x="63" y="228" width="16" height="33" rx="7"/></g>
+    <text x="140" y="416">From above · thumb side on the left</text>
+    <g class="under" transform="translate(300 46) scale(-.42 .42) translate(-139 -24)">
+      <path class="body" d="${MOUSE_BODY}"/>
+      <path class="deco" d="M100 46C130 36 170 36 200 46M96 372C126 386 166 386 196 372"/>
+      <circle class="deco" cx="148" cy="168" r="11"/>
+      <g data-btn="profile"><rect class="hit" x="110" y="196" width="76" height="60"/><rect class="shape" x="133" y="212" width="30" height="22" rx="6"/></g>
+    </g>
+    <text x="300" y="226">Underside</text>
+  </svg>`,
+};
+const MOUSE_DRAWINGS = { '00EA': BASILISK_V4_HS, '00EB': BASILISK_V4_HS };
+const drawing = () => (dev && dev.kind === 'mouse' && MOUSE_DRAWINGS[dev.pid]) || null;
+const buttonPlace = name => { const d = drawing(); return (d && d.buttons[name]) || null; };
+
+// Buttons of a drawn mouse: the drawing beside the tiles. Pointing at a tile or a button lights
+// up the other, and clicking a button on the drawing opens it. Buttons the mouse doesn't offer
+// stay on the drawing, greyed, with the reason.
+function mouseTiles(t, cur, d) {
+  const rows = new Map(cur.rows.filter(r => r.name).map(r => [r.name, r]));
+  const pic = el('div', { className: 'mousepic', innerHTML: d.svg });
+  const greyed = [];
+  pic.querySelectorAll('g[data-btn]').forEach(g => {
+    const name = g.dataset.btn, r = rows.get(name), where = d.buttons[name][0];
+    const tip = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    g.prepend(tip);
+    if (!r) {
+      const why = missingButton(name);
+      g.classList.add('none'); tip.textContent = where + ': ' + why; greyed.push([where, why]);
+      return;
+    }
+    const [html, changed] = cellView(r.key, dev.active);
+    const what = el('span', { innerHTML: html }).textContent;
+    tip.textContent = where + ': ' + what;
+    g.classList.toggle('changed', !!changed);
+    Object.entries({ 'data-row': r.key, tabindex: 0, role: 'button', 'aria-pressed': sel === r.key,
+      'aria-label': where + ': ' + what + (changed ? ' (changed)' : '') }).forEach(([k, v]) => g.setAttribute(k, v));
+  });
+  const grid = el('div', { className: 'tgrid' });
+  cur.rows.forEach(r => { const b = tile(r), about = buttonPlace(r.name); if (about) b.title = about[1]; grid.append(b); });
+  const side = el('div', { className: 'mouseside' }, grid);
+  greyed.forEach(([where, why]) => side.append(el('p', { className: 'hint', innerHTML: `<b>${esc(where)}</b> is greyed out on the drawing: ${esc(why)}.` })));
+  const wrap = el('div', { className: 'mousewrap' }, pic, side);
+  const rowOf = e => { const x = e.target.closest && e.target.closest('[data-row]'); return x ? x.dataset.row : null; };
+  const light = on => e => { const row = rowOf(e); if (row) wrap.querySelectorAll(`[data-row="${CSS.escape(row)}"]`).forEach(x => x.classList.toggle('hot', on)); };
+  wrap.addEventListener('pointerover', light(true)); wrap.addEventListener('pointerout', light(false));
+  wrap.addEventListener('focusin', light(true)); wrap.addEventListener('focusout', light(false));
+  const svg = pic.querySelector('svg');
+  svg.onclick = e => { const row = rowOf(e); if (row) select(row); };
+  svg.onkeydown = e => { const row = rowOf(e); if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); select(row); } };
+  t.append(wrap);
+}
+// Why a drawn button has no tile.
+function missingButton(name) {
+  if ((btnData[dev.id] || []).some(b => b.name === name)) return 'it has no HyperShift setting';
+  if ((btnUnread[dev.id] || []).includes(name)) return 'the mouse lists it, but won’t let software read or change it';
+  return 'the mouse doesn’t offer it for remapping';
+}
+
 function tile(r, short) {
   const [html, changed] = cellView(r.key, dev.active);
   const b = el('button', { className: 'tile' + (changed ? ' changed' : ''), ariaPressed: sel === r.key,
@@ -1195,7 +1315,7 @@ function refreshCell(row) {
     const [html, changed] = cellView(row, dev.active);
     t.querySelector('.tv').innerHTML = html; t.classList.toggle('changed', !!changed);
   }
-  if (document.querySelector(`#remapkb g[data-row="${CSS.escape(row)}"]`)) renderTiles(sections().find(s => s.id === section));
+  if (document.querySelector(`#remapkb g[data-row="${CSS.escape(row)}"], .mousepic g[data-row="${CSS.escape(row)}"]`)) renderTiles(sections().find(s => s.id === section));
   renderRail(sections());
 }
 
@@ -1958,15 +2078,16 @@ async function loadButtons(d, force) {
   if (dev && dev.id === d.id && !showAll) renderSheet();
   try {
     const r = await api('/api/buttons', { id: d.id });
-    btnData[d.id] = r.buttons; onboardData[d.id] = r.onboard; delete btnFailed[d.id];
+    btnData[d.id] = r.buttons; onboardData[d.id] = r.onboard; btnUnread[d.id] = r.unreadable || []; delete btnFailed[d.id];
   } catch { btnData[d.id] = []; btnFailed[d.id] = true; }
   if (dev && dev.id === d.id && !showAll) renderSheet();
 }
 
 function buttonEditor(box, name) {
   const b = (btnData[dev.id] || []).find(x => x.name === name); if (!b) return;
+  const place = buttonPlace(name), label = place ? place[0] : b.label;
   const action = b[btnLayer], [choice, keys, n] = splitAction(action);
-  const sel = el('select', { ariaLabel: b.label + ' action', id: 'btnSel' });
+  const sel = el('select', { ariaLabel: label + ' action', id: 'btnSel' });
   let found = false;
   BTN_CHOICES.forEach(([group, opts]) => {
     if (isBoard() && group === 'Sensitivity') return; // a keyboard has no DPI
@@ -1976,13 +2097,13 @@ function buttonEditor(box, name) {
     sel.append(g);
   });
   if (!found) sel.prepend(new Option(actionLabel(action) + ' (as saved)', action, false, true)); // only Synapse sets these
-  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: 'Press keys…', ariaLabel: 'Key for ' + b.label });
+  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: 'Press keys…', ariaLabel: 'Key for ' + label });
   keyIn.dataset.keys = keys;
   const numIn = el('input', { type: 'number', className: 'num', value: n });
   const numLabel = el('span', { className: 'val' });
   // Which macro, and how it plays: once, N times, while held, toggle.
   const macros = (macroData[dev.id] && macroData[dev.id].macros) || [];
-  const macroSel = el('select', { ariaLabel: 'Macro for ' + b.label });
+  const macroSel = el('select', { ariaLabel: 'Macro for ' + label });
   macros.forEach(mc => macroSel.append(new Option(mc.name, mc.id, false, choice === 'macro' && String(mc.id) === keys)));
   const playSel = el('select', { ariaLabel: 'How the macro plays' });
   [['1', 'Once'], ['times', 'Several times'], ['hold', 'While held'], ['toggle', 'Toggle on / off']].forEach(([v, t]) =>
@@ -2054,6 +2175,7 @@ function buttonEditor(box, name) {
   playSel.onchange = () => { extras(); send(); };
   extras();
   const saved = b.saved && b.saved[btnLayer];
+  if (place) box.append(el('p', { className: 'note', textContent: place[1] }));
   box.append(el('div', { className: 'edgroup' },
     el('h3', { textContent: 'What it does' + (btnLayer === 'hypershift' ? ' while HyperShift is held' : '') }),
     el('div', { className: 'row' }, sel, keyIn, modBox, macroSel, playSel, numIn, numLabel)));

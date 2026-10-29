@@ -322,9 +322,12 @@ fn buttons_json(dev: &Device, store: &mut Store) -> Value {
     use secbird_core::buttons::{setting_key, Input, Layer};
     // Keyboards, keypads and laptops list their keys; everything else its mouse buttons.
     let keyboard = dev.spec.as_ref().is_some_and(|s| matches!(s.kind, Kind::Keyboard | Kind::Keypad | Kind::Laptop));
-    let inputs: Vec<(Input, _)> = match keyboard {
-        true => dev.keys().into_iter().map(|(id, a)| (Input::Key(id), a)).collect(),
-        false => dev.buttons().into_iter().map(|(id, a)| (Input::Button(id), a)).collect(),
+    let (inputs, unread): (Vec<(Input, _)>, Vec<u8>) = match keyboard {
+        true => (dev.keys().into_iter().map(|(id, a)| (Input::Key(id), a)).collect(), Vec::new()),
+        false => {
+            let (found, unread) = dev.button_list();
+            (found.into_iter().map(|(id, a)| (Input::Button(id), a)).collect(), unread)
+        }
     };
     let profiles = store.for_device(dev);
     let remapped = &profiles.active().buttons;
@@ -360,7 +363,9 @@ fn buttons_json(dev: &Device, store: &mut Store) -> Value {
         let changed = profiles.profiles.get(&o.profile).map(|p| &p.buttons) != Some(&o.buttons);
         json!({ "slot": o.slot, "profile": o.profile, "count": o.buttons.len(), "changed": changed })
     });
-    json!({ "buttons": list, "onboard": onboard })
+    // Buttons the mouse lists but won't let us read or change.
+    let unreadable: Vec<String> = unread.into_iter().map(secbird_core::buttons::button_name).collect();
+    json!({ "buttons": list, "onboard": onboard, "unreadable": unreadable })
 }
 
 fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
