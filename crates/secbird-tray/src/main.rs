@@ -15,6 +15,8 @@ mod server;
 mod settings;
 #[cfg(windows)]
 mod win;
+#[cfg(windows)]
+mod wake_sync;
 
 #[cfg(windows)]
 fn main() {

@@ -2334,6 +2334,20 @@ function renderSettings() {
   const startup = group('Startup and games',
     row('Start with Windows', 'Your settings go back on as soon as you sign in. Off means they only apply while Secretarybird is running.', ...traySwitch('autostart', 'Start with Windows')),
     row('Switch profiles with games', 'A profile tied to a program comes up while that program is in front, and goes back after.', ...traySwitch('auto_switch', 'Switch profiles with games')),
+    row('Re-sync Spectrum when either device wakes (experimental)',
+      'When a device wakes (seen through Windows Raw Input, no HID polling), Spectrum restarts on it and on the other devices that are awake, so they cycle in step whichever wakes first. A device still asleep is left alone and synced when it wakes. Restart Secretarybird after turning this on.',
+      ...traySwitch('spectrum_wake_sync', 'Re-sync Spectrum when either device wakes')),
+    row('Re-sync Spectrum now',
+      'Restart Spectrum cycling on all connected devices that already use the Spectrum effect. Other effects and colors are left untouched.',
+      el('button', { className: 'ghost', textContent: 'Re-sync now', onclick: async e => {
+        const button = e.currentTarget; button.disabled = true;
+        try {
+          const r = await api('/api/resync-spectrum', {});
+          const missed = (r.failed || []).length ? ' (not answering: ' + r.failed.join(', ') + ')' : '';
+          toast(r.zones ? 'Spectrum restarted on ' + r.zones + ' lighting zones' + missed : (r.reason || 'No device took the write' + missed), !r.zones || !!missed);
+        } catch (err) { toast(err.message, true); }
+        button.disabled = false;
+      } })),
     row('Lights when away', 'While the PC is locked or its screen is off, the lights dim to a quarter or turn off, and come back when you return. Nothing is saved on the devices.',
       seg('Lights when away', [['', 'Leave on'], ['dim', 'Dim'], ['off', 'Off']], a.away_lights || '', async v => {
         try {

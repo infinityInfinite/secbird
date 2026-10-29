@@ -1,6 +1,7 @@
 //! Device and profile handling for the tray, kept free of Win32 code.
 
-use secbird_core::{config_dir, discover, hidapi::HidApi, Db, Device, Dimming, Result, Store};
+use crate::wake_sync::Peer;
+use secbird_core::{config_dir, discover, effects::Effect, hidapi::HidApi, Db, Device, Dimming, Result, Store};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -62,6 +63,32 @@ pub struct LightsRetry {
     pub gave_up: Vec<String>,
 }
 
+/// One zone written by [`Engine::restart_spectrum`].
+pub struct ZoneWrite {
+    pub pid: u16,
+    pub zone: String,
+    pub result: Result<()>,
+    pub took: Duration,
+}
+
+/// For the log: `02C9 backlight ok (31 ms), 00EA underglow failed: ... (160 ms)`.
+pub fn describe_writes(writes: &[ZoneWrite]) -> String {
+    if writes.is_empty() {
+        return "nothing written".into();
+    }
+    let parts: Vec<String> = writes
+        .iter()
+        .map(|w| {
+            let ms = w.took.as_millis();
+            match &w.result {
+                Ok(()) => format!("{:04X} {} ok ({ms} ms)", w.pid, w.zone),
+                Err(e) => format!("{:04X} {} failed: {e} ({ms} ms)", w.pid, w.zone),
+            }
+        })
+        .collect();
+    parts.join(", ")
+}
+
 /// What happened when a device's active profile was sent to it.
 pub struct ApplyReport {
     pub device: String,
@@ -118,6 +145,83 @@ impl Engine {
                     .map(move |i| (dev.key(), i.path().to_owned()))
             })
             .collect()
+    }
+
+    /// Devices whose profile in use shows Spectrum on a lit zone, by product id. `Err` says
+    /// why none can be written now.
+    pub fn spectrum_pids(&self) -> std::result::Result<Vec<u16>, String> {
+        if self.away.is_some() {
+            return Err("lights are down while away".into());
+        }
+        let mut store = Self::store().map_err(|e| format!("profiles.json: {e}"))?;
+        let mut pids = Vec::new();
+        for dev in &self.devices {
+            if !pids.contains(&dev.pid) && !self.spectrum_zones(&mut store, dev).is_empty() {
+                pids.push(dev.pid);
+            }
+        }
+        Ok(pids)
+    }
+
+    /// LED id and name of each zone of `dev` that shows Spectrum in its profile in use.
+    fn spectrum_zones(&self, store: &mut Store, dev: &Device) -> Vec<(u8, String)> {
+        let p = store.for_device(dev);
+        if p.lighting_off {
+            return Vec::new();
+        }
+        let name = p.effective(self.foreground()).to_string();
+        let (Some(profile), Some(spec)) = (p.profiles.get(&name), &dev.spec) else { return Vec::new() };
+        spec.leds
+            .iter()
+            .filter(|led| {
+                profile.lighting.get(&led.name).is_some_and(|z| !z.off && z.effect.as_ref() == Some(&Effect::Spectrum))
+            })
+            .map(|led| (led.id, led.name.clone()))
+            .collect()
+    }
+
+    /// Restart the hardware Spectrum of the devices in `order`, in that order, without
+    /// changing any profile. The first `strict` of them just woke: when one of those doesn't
+    /// take the write, stop, so the rest aren't restarted out of step with it. Returns
+    /// every write made.
+    pub fn restart_spectrum(&self, order: &[u16], strict: usize) -> Vec<ZoneWrite> {
+        let Ok(mut store) = Self::store() else { return Vec::new() };
+        let mut writes = Vec::new();
+        for (i, &pid) in order.iter().enumerate() {
+            for dev in self.devices.iter().filter(|d| d.pid == pid) {
+                for (led, zone) in self.spectrum_zones(&mut store, dev) {
+                    let start = Instant::now();
+                    let result = dev.set_effect(led, &Effect::Spectrum);
+                    let stop = result.is_err() && i < strict;
+                    writes.push(ZoneWrite { pid, zone, result, took: start.elapsed() });
+                    if stop {
+                        return writes;
+                    }
+                }
+            }
+        }
+        writes
+    }
+
+    /// Devices whose Raw Input may wake a Spectrum sync: those found, with the sleep timer
+    /// their profile sets, and the known wireless ones plugged in but asleep.
+    pub fn wake_peers(&self) -> HashMap<u16, Peer> {
+        let mut store = Self::store().ok();
+        let mut peers = HashMap::new();
+        for dev in &self.devices {
+            let minutes = store.as_mut().and_then(|s| {
+                let p = s.for_device(dev);
+                let name = p.effective(self.foreground()).to_string();
+                p.profiles.get(&name)?.sleep_minutes
+            });
+            let sleep = minutes.filter(|m| *m > 0).map(|m| Duration::from_secs(u64::from(m) * 60));
+            let wireless = dev.spec.as_ref().is_some_and(|s| s.wireless);
+            peers.insert(dev.pid, Peer { wireless, sleep });
+        }
+        for asleep in self.unsupported.iter().filter(|u| u.reason == ASLEEP) {
+            peers.entry(asleep.pid).or_insert(Peer { wireless: true, sleep: None });
+        }
+        peers
     }
 
     pub fn open_events(&self, path: &std::ffi::CStr) -> Option<secbird_core::hidapi::HidDevice> {
