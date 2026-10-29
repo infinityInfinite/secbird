@@ -24,11 +24,16 @@ pub struct Engine {
     away: Option<u8>,
     /// Devices that didn't answer [`Engine::lights_back`], and until when to keep trying.
     relight: HashMap<String, Instant>,
+    /// Devices that didn't answer [`Engine::lights_away`], and until when to keep trying.
+    dim: HashMap<String, Instant>,
 }
 
 const FINDER_PAUSE: Duration = Duration::from_secs(10 * 60);
 /// A wireless keyboard can miss the "back" write and answer ~20 s later (#52).
-const RELIGHT_FOR: Duration = Duration::from_secs(2 * 60);
+pub const RELIGHT_FOR: Duration = Duration::from_secs(2 * 60);
+/// A device can miss the "away" write too (a Basilisk V4 HyperSpeed often does, right as the
+/// screen goes off) and then stays lit the whole time: try again for a while.
+pub const DIM_FOR: Duration = Duration::from_secs(30);
 
 /// Battery state of one wireless device.
 pub struct Battery {
@@ -47,6 +52,14 @@ pub struct Unsupported {
     pub pid: u16,
     pub name: String,
     pub reason: &'static str,
+}
+
+/// What a retry of [`Engine::lights_away`] or [`Engine::lights_back`] did, by device key.
+pub struct LightsRetry {
+    /// Took the write this time.
+    pub done: Vec<String>,
+    /// Still not answering when the time ran out: no more tries.
+    pub gave_up: Vec<String>,
 }
 
 /// What happened when a device's active profile was sent to it.
@@ -78,6 +91,7 @@ impl Engine {
             frames_paused_until: None,
             away: None,
             relight: HashMap::new(),
+            dim: HashMap::new(),
         })
     }
 
@@ -245,35 +259,59 @@ impl Engine {
     /// to `percent` of its saved brightness, with writes that aren't saved, so a replug or
     /// power cycle brings the lights back. Also call it after a rescan while away, for
     /// devices that just arrived. Devices with the older lighting commands are left lit.
-    pub fn lights_away(&mut self, percent: u8) {
+    /// Returns the keys of the devices that missed it: [`Engine::retry_lights_away`] tries
+    /// them again for [`DIM_FOR`].
+    pub fn lights_away(&mut self, percent: u8) -> Vec<String> {
         self.away = Some(percent);
         self.relight.clear();
-        self.each_zone(|dev, led| {
-            let saved = dev.brightness(led)?;
-            dev.set_brightness_live(led, (saved as u32 * percent as u32 / 100) as u8)
+        let missed = self.each_zone(|dev, led| dim_zone(dev, led, percent));
+        let until = Instant::now() + DIM_FOR;
+        self.dim = missed.iter().map(|key| (key.clone(), until)).collect();
+        missed
+    }
+
+    /// [`Engine::lights_away`] again for the devices that missed it, while still away, until
+    /// they answer or [`DIM_FOR`] runs out.
+    pub fn retry_lights_away(&mut self) -> LightsRetry {
+        let gave_up = expire(&mut self.dim, Instant::now());
+        let Some(percent) = self.away.filter(|_| !self.dim.is_empty()) else {
+            return LightsRetry { done: Vec::new(), gave_up };
+        };
+        let missed = self.each_zone(|dev, led| {
+            if !self.dim.contains_key(&dev.key()) {
+                return Ok(());
+            }
+            dim_zone(dev, led, percent)
         });
+        let done: Vec<String> = self.dim.keys().filter(|k| !missed.contains(k) && self.has(k)).cloned().collect();
+        for key in &done {
+            self.dim.remove(key);
+        }
+        LightsRetry { done, gave_up }
     }
 
     /// Back from [`Engine::lights_away`]: the saved brightness again, read from the device
     /// (it answers the saved level, not the dimmed one), so it works after a tray restart too.
-    /// Then the profiles, in case one changed while away.
-    pub fn lights_back(&mut self) -> Vec<ApplyReport> {
+    /// Then the profiles, in case one changed while away. Returns the keys of the devices
+    /// that missed it: [`Engine::retry_lights_back`] tries them again for [`RELIGHT_FOR`].
+    pub fn lights_back(&mut self) -> Vec<String> {
         if self.away.take().is_none() {
             return Vec::new();
         }
+        self.dim.clear();
         let missed = self.each_zone(|dev, led| dev.set_brightness_live(led, dev.brightness(led)?));
         let until = Instant::now() + RELIGHT_FOR;
-        self.relight = missed.into_iter().map(|key| (key, until)).collect();
-        self.apply(&self.all_keys())
+        self.relight = missed.iter().map(|key| (key.clone(), until)).collect();
+        self.apply(&self.all_keys());
+        missed
     }
 
     /// [`Engine::lights_back`] again for the devices that missed it, until they answer or
-    /// [`RELIGHT_FOR`] runs out.
-    pub fn retry_lights_back(&mut self) {
-        let now = Instant::now();
-        self.relight.retain(|_, until| now < *until);
+    /// [`RELIGHT_FOR`] runs out. Those that answer get their profile again.
+    pub fn retry_lights_back(&mut self) -> LightsRetry {
+        let gave_up = expire(&mut self.relight, Instant::now());
         if self.relight.is_empty() || self.away.is_some() {
-            return;
+            return LightsRetry { done: Vec::new(), gave_up };
         }
         let missed = self.each_zone(|dev, led| {
             if !self.relight.contains_key(&dev.key()) {
@@ -281,13 +319,31 @@ impl Engine {
             }
             dev.set_brightness_live(led, dev.brightness(led)?)
         });
-        let back: Vec<String> = self.relight.keys().filter(|k| !missed.contains(k)).cloned().collect();
-        for key in &back {
+        let done: Vec<String> = self.relight.keys().filter(|k| !missed.contains(k) && self.has(k)).cloned().collect();
+        for key in &done {
             self.relight.remove(key);
         }
-        if !back.is_empty() {
-            self.apply(&back);
+        if !done.is_empty() {
+            self.apply(&done);
         }
+        LightsRetry { done, gave_up }
+    }
+
+    /// Whether the device with this key is in the list.
+    fn has(&self, key: &str) -> bool {
+        self.devices.iter().any(|d| d.key() == key)
+    }
+
+    /// Device names for the log, without serial numbers.
+    pub fn names(&self, keys: &[String]) -> String {
+        let names: Vec<String> = keys
+            .iter()
+            .map(|key| match self.devices.iter().find(|d| d.key() == *key) {
+                Some(dev) => self.label(dev),
+                None => key.split(':').next().unwrap_or_default().to_string(),
+            })
+            .collect();
+        names.join(", ")
     }
 
     pub fn is_away(&self) -> bool {
@@ -462,5 +518,39 @@ impl Engine {
             n if twins > 1 && n > 0 => format!("{} ({})", dev.name(), &dev.serial[n.saturating_sub(4)..]),
             _ => dev.name(),
         }
+    }
+}
+
+/// One zone to `percent` of its saved brightness, not saved on the device.
+fn dim_zone(dev: &Device, led: u8, percent: u8) -> Result<()> {
+    let saved = dev.brightness(led)?;
+    dev.set_brightness_live(led, (saved as u32 * percent as u32 / 100) as u8)
+}
+
+/// Drop the entries whose time ran out, and return their keys.
+fn expire(until: &mut HashMap<String, Instant>, now: Instant) -> Vec<String> {
+    let mut gone: Vec<String> = until.iter().filter(|(_, t)| now >= **t).map(|(key, _)| key.clone()).collect();
+    gone.sort();
+    for key in &gone {
+        until.remove(key);
+    }
+    gone
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expire;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn retries_run_out_one_device_at_a_time() {
+        let now = Instant::now();
+        let mut until = HashMap::from([("00EA:A".to_string(), now + Duration::from_secs(30)), ("02C9:B".to_string(), now)]);
+        assert_eq!(expire(&mut until, now), ["02C9:B"]);
+        assert_eq!(until.len(), 1);
+        assert!(expire(&mut until, now + Duration::from_secs(29)).is_empty());
+        assert_eq!(expire(&mut until, now + Duration::from_secs(30)), ["00EA:A"]);
+        assert!(until.is_empty());
     }
 }
