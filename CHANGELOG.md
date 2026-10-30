@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.1] - 2026-10-30
 
 ### Added
 - Bluetooth, first try: mice connected over Bluetooth are now asked the same way as over the
@@ -9,6 +9,26 @@
   Untested: no Bluetooth Razer mouse here (#10, #51).
 - `secbird report` lists the feature reports each interface declares (`feature 5:90` = report
   id 5, 90 bytes), and the report id a device answered under.
+- Mouse Dock V2 Pro (00F1): the mouse on it shows up by name ("Naga V3 Pro on Mouse Dock V2
+  Pro") with its DPI, polling rate, buttons and lighting zones, plus a Dock zone for the dock's
+  own light, the same as on the Mouse Dock Pro. Built from two reports (#61, #72, thanks
+  Skillprofi10 and Jayram2000); not tested on a V2 dock here.
+- Buttons on the Basilisk V4 HyperSpeed are named by where they are ("Side, rear (Mouse 4)",
+  "Side trigger (HyperShift)", "Underside (profile button)"), with a line on where to find each
+  one (#71, thanks lukethehawk). Other mice keep the generic names.
+
+### Fixed
+- A mouse on a mouse dock gets its mouse picture in the device list, not the dock's.
+- Buttons: "Play a macro…" is offered only on devices with macro memory. Before, it showed on
+  every mouse and pointed to a Macros section that devices without macro memory don't have
+  (#67, thanks FRNVR). Picking it before any macro is made now opens the Macros section.
+- Lights when away: a device that misses the write that dims it is tried again every 3 s for
+  30 s, instead of staying lit the whole time you're away. The log names devices that don't
+  answer, going away and coming back (#68, thanks lukethehawk).
+- Basilisk V4 HyperSpeed lighting: one zone, the underglow (LED 10), instead of logo and scroll
+  zones that did nothing. Reactive and Starlight are left out on it: the mouse accepts them but
+  doesn't run them (#69, thanks lukethehawk). Devices can now list effects they don't run; a
+  saved profile with one shows Static and skips it.
 
 ## [0.5.0] - 2026-10-27
 

@@ -766,8 +766,8 @@ pub fn from_env() -> Vec<Device> {
 }
 
 /// Every preset `SECBIRD_SIM=all` loads.
-pub const PRESETS: [&str; 13] =
-    ["mouse", "wireless", "keyboard", "old-keyboard", "naga", "cobra", "dock", "hyperpolling", "blackwidow", "goliathus", "firefly", "blade", "base-station"];
+pub const PRESETS: [&str; 14] =
+    ["mouse", "wireless", "keyboard", "old-keyboard", "naga", "cobra", "dock", "dock-v2", "hyperpolling", "blackwidow", "goliathus", "firefly", "blade", "base-station"];
 
 /// A simulated device by name. The later ones copy devices users reported, under their real
 /// product ids, so the editor treats them exactly as it treats the hardware.
@@ -806,6 +806,19 @@ pub fn preset(name: &str) -> Option<(Sim, u16)> {
                 (4, 1, [4, 0, 0, 0, 0]), (5, 1, [5, 0, 0, 0, 0]), (14, 7, [4, 0, 0, 0, 0]),
                 (15, 6, [5, 0x01, 0x90, 0x01, 0x90]), (52, 14, [0x68, 0, 0x14, 0, 0]), (53, 14, [0x69, 0, 0x14, 0, 0]), (96, 6, [6, 0, 0, 0, 0])]);
             (Sim::new(s), 0x00A4)
+        }
+        // Mouse Dock V2 Pro with a Naga V3 Pro on it, issue #61.
+        "dock-v2" => {
+            let sim = Sim::naga();
+            {
+                let mut s = sim.state();
+                s.serial = "SIMDOCKV2001".into();
+                s.polling_hs = Some(0x04);
+                s.leds = vec![1, 4, 5];
+                s.paired = vec![(true, 0x00E8)];
+                s.dock_light = Some(vec![3, 0]);
+            }
+            (sim, 0x00F1)
         }
         // HyperPolling dongle (00B3) with a DeathAdder V3 Pro paired to it.
         "hyperpolling" => {
@@ -1200,6 +1213,36 @@ mod tests {
         dock.identify_docked_mouse(&db);
         assert_eq!(dock.name(), "Basilisk V3 Pro on Mouse Dock Pro");
         assert_eq!(dock.polling_rate().unwrap(), 1000);
+    }
+
+    #[test]
+    fn a_docked_mouse_keeps_the_effects_it_cant_run() {
+        let (sim, mut dev, db) = docked_basilisk();
+        sim.state().paired = vec![(true, 0x00EA)];
+        dev.identify_docked_mouse(&db);
+        assert_eq!(dev.name(), "Basilisk V4 HyperSpeed on Mouse Dock Pro");
+        let reactive = crate::effects::Effect::Reactive { color: Rgb(255, 0, 0), duration: 2 };
+        assert!(!dev.supports_effect(&reactive));
+        assert!(dev.supports_effect(&crate::effects::Effect::Spectrum));
+    }
+
+    #[test]
+    fn mouse_dock_v2_pro_works_like_the_dock_pro() {
+        let db = crate::db::Db::builtin().unwrap();
+        let (sim, pid) = preset("dock-v2").unwrap();
+        let mut dev = sim.open(pid, db.get(pid).cloned()).unwrap();
+        dev.identify_receiver(&db);
+        assert_eq!(dev.name(), "Naga V3 Pro on Mouse Dock V2 Pro");
+        assert_eq!(dev.key(), "00F1:SIMDOCKV2001", "profiles stay with the dock");
+        assert_eq!(dev.polling_rate().unwrap(), 2000);
+        let leds: Vec<&str> = dev.spec.as_ref().unwrap().leds.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(leds, ["logo", "scroll", "side", "dock"]);
+
+        let dock = dev.led_id("dock").unwrap();
+        dev.set_static_color(dock, Rgb(0, 0, 255)).unwrap();
+        assert_eq!(sim.state().dock_light.as_deref(), Some(&[cmd::EFFECT_STATIC, 0, 0, 1, 0, 0, 255][..]));
+        dev.set_static_color(dev.led_id("side").unwrap(), Rgb(1, 2, 3)).unwrap();
+        assert_eq!(sim.state().effects[&5][4..7], [1, 2, 3], "the Naga's own lights go to the Naga");
     }
 
     #[test]
