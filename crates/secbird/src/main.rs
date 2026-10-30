@@ -17,7 +17,7 @@ DEVICE:
   report [--json]           Read-only description of connected Razer hardware, to share
                             when a device is missing or misbehaves (serials shortened)
   dock-test <red|spectrum|battery|off>
-                            Test: set a Mouse Dock Pro's own light once (#39)
+                            Test: set a mouse dock's own light once (#39)
 
 SETTINGS (saved to the active profile):
   dpi [X[xY]]               Show or set DPI (e.g. 1600 or 1600x800)
@@ -763,7 +763,7 @@ fn dock_test(devices: &[Device], what: Option<&str>) -> Result<(), Error> {
         Some("off") => &[1, DOCK_LED, 0x00, 0, 0, 0],
         _ => return Err(Error::InvalidArg("usage: dock-test red|spectrum|battery|off".into())),
     };
-    let dock = devices.iter().find(|d| d.is_mouse_dock()).ok_or_else(|| Error::NotFound("a Mouse Dock Pro".into()))?;
+    let dock = devices.iter().find(|d| d.is_mouse_dock()).ok_or_else(|| Error::NotFound("a mouse dock".into()))?;
     let command = secbird_core::commands::MATRIX_EFFECT;
     match dock.transact_as(DOCK_TXID, command, args.len() as u8, args) {
         Ok(_) => println!("The dock accepted {command} with txid {DOCK_TXID:02X}. Did its light change?"),

@@ -718,7 +718,8 @@ const ART = {
 function deviceArt(d) {
   const n = d.name || '';
   if (/receiver|dongle/i.test(n)) return 'dongle';
-  if (/dock|charging pad|base station|bungee/i.test(n)) return 'dock';
+  // "Naga V3 Pro on Mouse Dock V2 Pro" is the mouse; the dock is only its receiver.
+  if (!/ on Mouse Dock/i.test(n) && /dock|charging pad|base station|bungee/i.test(n)) return 'dock';
   if (/speaker|nommo|leviathan/i.test(n)) return 'speaker';
   if (d.kind === 'mouse') return /naga/i.test(n) ? 'naga' : 'mouse';
   if (d.kind === 'keyboard') {
@@ -866,7 +867,8 @@ function sections() {
   if (dev.kind === 'mouse' || isBoard()) {
     const list = btnData[dev.id];
     s.push({ id: 'buttons', name: isBoard() ? 'Keys' : 'Buttons', tools: 'layer', loading: !list,
-      rows: [...(list || []).filter(b => b[btnLayer] != null).map(b => ({ key: 'btn:' + b.name, label: b.label, name: b.name })),
+      rows: [...(list || []).filter(b => b[btnLayer] != null).sort((a, b) => placeRank(a.name) - placeRank(b.name))
+        .map(b => ({ key: 'btn:' + b.name, label: (buttonPlace(b.name) || [b.label])[0], name: b.name })),
         ...(list && list.length && !isBoard() ? [{ key: 'onboard', label: 'Saved on the mouse' }] : [])] });
   }
   if (dev.macros) s.push({ id: 'macros', name: 'Macros', rows: [{ key: 'macros', label: 'Macros on the device' }] });
@@ -1097,6 +1099,28 @@ function keyTiles(t, cur) {
   const open = rest.some(r => r.key === sel || cellView(r.key, dev.active)[1]);
   t.append(el('details', { className: 'morekeys', open }, el('summary', { className: 'subhead', textContent: `${plural(rest.length, 'more key')}, not on the drawing` }), g));
 }
+
+// Buttons named by where they are on the mouse, for models whose layout was checked on the
+// real thing (#71, thanks lukethehawk): [name, where to find it]. Other devices keep the
+// generic names. Tiles follow this order.
+const BASILISK_V4_HS = {
+  left: ['Left button', 'The main button under your index finger.'],
+  right: ['Right button', 'The main button under your middle finger.'],
+  'scroll-up': ['Wheel, roll up', 'Rolling the scroll wheel away from you.'],
+  wheel: ['Wheel, press', 'Pressing down on the scroll wheel.'],
+  'scroll-down': ['Wheel, roll down', 'Rolling the scroll wheel toward you.'],
+  'tilt-left': ['Wheel, tilt left', 'Pushing the scroll wheel to the left.'],
+  'tilt-right': ['Wheel, tilt right', 'Pushing the scroll wheel to the right.'],
+  hypershift: ['Side trigger (HyperShift)', 'The trigger at the front of the thumb side, below the left button.'],
+  'side-extra': ['Side, front (extra button)', 'The front one of the three buttons on the thumb side.'],
+  'side-forward': ['Side, middle (Mouse 5)', 'The middle one of the three buttons on the thumb side. Forward from the factory.'],
+  'side-back': ['Side, rear (Mouse 4)', 'The rear one of the three buttons on the thumb side, nearest your palm. Back from the factory.'],
+  profile: ['Underside (profile button)', 'The button on the bottom of the mouse.'],
+};
+const BUTTON_PLACES = { '00EA': BASILISK_V4_HS, '00EB': BASILISK_V4_HS };
+const buttonPlaces = () => (dev && dev.kind === 'mouse' && BUTTON_PLACES[dev.pid]) || null;
+const buttonPlace = name => (buttonPlaces() || {})[name] || null;
+const placeRank = name => { const order = Object.keys(buttonPlaces() || {}), i = order.indexOf(name); return i < 0 ? order.length : i; };
 
 function tile(r, short) {
   const [html, changed] = cellView(r.key, dev.active);
@@ -1506,12 +1530,16 @@ function effectLabel(e) {
 function effectGroup(name) {
   const z = zoneOf(dev.profile, name), cur = z.effect || '';
   const [kind0, rest = ''] = cur.split(':'), [arg0, n0] = rest.split('@');
-  const kind = cur ? kind0 : 'static';
+  const unsupported = dev.unsupported_effects || [];
+  // Old profiles may contain an effect the device was later shown not to run.
+  // Present Static as the safe default; selecting an effect saves the replacement.
+  const kind = cur && !unsupported.includes(kind0) ? kind0 : 'static';
   const sel = el('select', { id: 'zoneFx', ariaLabel: 'Effect' });
   // Battery is offered for a dock's light only (#39), where Synapse has its battery-level
   // lighting. The dock takes reactive and starlight but shows nothing, so those are left out.
   const dockOnly = ['battery'], notOnDock = ['reactive', 'starlight'];
-  EFFECTS.filter(([v]) => name === 'dock' ? !notOnDock.includes(v) : !dockOnly.includes(v)).forEach(([v, t]) => sel.append(new Option(t, v, false, v === kind)));
+  EFFECTS.filter(([v]) => !unsupported.includes(v) && (name === 'dock' ? !notOnDock.includes(v) : !dockOnly.includes(v)))
+    .forEach(([v, t]) => sel.append(new Option(t, v, false, v === kind)));
   const dir = el('select', { ariaLabel: 'Wave direction' });
   [['right', 'Right →'], ['left', '← Left']].forEach(([v, t]) => dir.append(new Option(t, v, false, kind === 'wave' && v === (arg0 || 'right'))));
   const speed = el('input', { type: 'range', min: 1, max: 5, step: 1, value: kind === 'wave' ? (n0 || 3) : 3, ariaLabel: 'Wave speed' });
@@ -1522,7 +1550,10 @@ function effectGroup(name) {
   const note = el('p', { className: 'note' });
   const show = () => {
     const k = sel.value;
-    note.textContent = k === 'battery'
+    const savedKind = (zoneOf(dev.profile, name).effect || '').split(':')[0];
+    note.textContent = savedKind && unsupported.includes(savedKind)
+      ? 'The saved ' + savedKind + ' effect is not supported on this device. Choose an available effect to replace it.'
+      : k === 'battery'
       ? 'Green when the mouse is charged, through yellow and orange to red when it’s nearly empty. Secretarybird updates it every 5 minutes.'
       : 'Runs on the device itself. Not every device has every effect; it says so if not.';
     dir.hidden = speed.hidden = k !== 'wave';
@@ -1541,8 +1572,14 @@ function effectGroup(name) {
     try {
       await api('/api/effect', { zone: name, effect: text });
       record(name, { effect: text, off: false });
+      show();
       toast(effectLabel(text) + ' · saved to ' + dev.active);
-    } catch (e) { toast(e.message, true); sel.value = (zoneOf(dev.profile, name).effect || 'static').split(':')[0]; show(); }
+    } catch (e) {
+      toast(e.message, true);
+      const previous = (zoneOf(dev.profile, name).effect || 'static').split(':')[0];
+      sel.value = unsupported.includes(previous) ? 'static' : previous;
+      show();
+    }
   };
   [sel, dir, speed, dur, rnd].forEach(c => c.onchange = send);
   show();
@@ -1966,23 +2003,25 @@ async function loadButtons(d, force) {
 function buttonEditor(box, name) {
   const b = (btnData[dev.id] || []).find(x => x.name === name); if (!b) return;
   const action = b[btnLayer], [choice, keys, n] = splitAction(action);
-  const sel = el('select', { ariaLabel: b.label + ' action', id: 'btnSel' });
+  const place = buttonPlace(name), label = place ? place[0] : b.label;
+  const sel = el('select', { ariaLabel: label + ' action', id: 'btnSel' });
   let found = false;
   BTN_CHOICES.forEach(([group, opts]) => {
     if (isBoard() && group === 'Sensitivity') return; // a keyboard has no DPI
+    if (group === 'Macro' && !dev.macros) return; // no macro memory, so nothing to play (#67)
     const g = el('optgroup', { label: group });
     opts.filter(([v]) => !(isBoard() && v === 'scroll-mode:1'))
       .forEach(([v, t]) => { g.append(new Option(t, v, false, v === choice)); found ||= v === choice; });
     sel.append(g);
   });
   if (!found) sel.prepend(new Option(actionLabel(action) + ' (as saved)', action, false, true)); // only Synapse sets these
-  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: 'Press keys…', ariaLabel: 'Key for ' + b.label });
+  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: 'Press keys…', ariaLabel: 'Key for ' + label });
   keyIn.dataset.keys = keys;
   const numIn = el('input', { type: 'number', className: 'num', value: n });
   const numLabel = el('span', { className: 'val' });
   // Which macro, and how it plays: once, N times, while held, toggle.
   const macros = (macroData[dev.id] && macroData[dev.id].macros) || [];
-  const macroSel = el('select', { ariaLabel: 'Macro for ' + b.label });
+  const macroSel = el('select', { ariaLabel: 'Macro for ' + label });
   macros.forEach(mc => macroSel.append(new Option(mc.name, mc.id, false, choice === 'macro' && String(mc.id) === keys)));
   const playSel = el('select', { ariaLabel: 'How the macro plays' });
   [['1', 'Once'], ['times', 'Several times'], ['hold', 'While held'], ['toggle', 'Toggle on / off']].forEach(([v, t]) =>
@@ -2046,7 +2085,8 @@ function buttonEditor(box, name) {
   sel.onchange = () => {
     extras();
     if (sel.value === 'key' || sel.value === 'turbo-key') { setKeys(''); keyIn.focus(); return toast('Now press the key or shortcut'); }
-    if (sel.value === 'macro' && !macros.length) return toast('Make a macro first, in the Macros section', true);
+    if (sel.value === 'macro' && macroData[dev.id] === null) return toast('Reading the macros from the device…');
+    if (sel.value === 'macro' && !macros.length) { showSection('macros'); return toast('Make a macro first, then pick it here'); }
     send();
   };
   numIn.onchange = () => { numIn.dataset.touched = '1'; send(); };
@@ -2054,6 +2094,7 @@ function buttonEditor(box, name) {
   playSel.onchange = () => { extras(); send(); };
   extras();
   const saved = b.saved && b.saved[btnLayer];
+  if (place) box.append(el('p', { className: 'note', textContent: place[1] }));
   box.append(el('div', { className: 'edgroup' },
     el('h3', { textContent: 'What it does' + (btnLayer === 'hypershift' ? ' while HyperShift is held' : '') }),
     el('div', { className: 'row' }, sel, keyIn, modBox, macroSel, playSel, numIn, numLabel)));
