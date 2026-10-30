@@ -228,6 +228,7 @@ impl Server {
             ("GET", "/api/settings") => Ok(settings_json(&engine)),
             ("GET", "/api/export") => Store::load(&config_dir().join("profiles.json"))
                 .and_then(|s| serde_json::to_value(&s).map_err(|e| Error::Db(e.to_string()))),
+            ("POST", "/api/resync-spectrum") => Ok(resync_spectrum(&engine)),
             ("POST", path) => post(&mut engine, path, &req.body),
             _ => return Response::text("404 Not Found", "Not found"),
         };
@@ -568,6 +569,20 @@ fn sync(engine: &mut Engine, color: &str, effect: &str) -> Result<Value, Error> 
     Ok(json!({ "zones": zones, "devices": pids.len(), "skipped": skipped, "failed": failed, "state": state(engine) }))
 }
 
+/// "Re-sync now": restart Spectrum on every device showing it, whether or not it woke.
+fn resync_spectrum(engine: &Engine) -> Value {
+    let pids = match engine.spectrum_pids() {
+        Ok(pids) if pids.len() >= 2 => pids,
+        Ok(_) => return json!({ "zones": 0, "reason": "Set Spectrum cycling on at least two devices first" }),
+        Err(reason) => return json!({ "zones": 0, "reason": reason }),
+    };
+    let writes = engine.restart_spectrum(&pids, 0);
+    secbird_core::log::append(&format!("Spectrum re-sync now: {}", crate::engine::describe_writes(&writes)));
+    let zones = writes.iter().filter(|w| w.result.is_ok()).count();
+    let failed: Vec<String> = writes.iter().filter(|w| w.result.is_err()).map(|w| format!("{:04X} {}", w.pid, w.zone)).collect();
+    json!({ "zones": zones, "failed": failed })
+}
+
 /// The app's own settings, for the editor's Settings page.
 fn settings_json(engine: &Engine) -> Value {
     let s = crate::settings::TraySettings::load();
@@ -583,6 +598,7 @@ fn settings_json(engine: &Engine) -> Value {
         "battery_warning_at": s.low_battery(),
         "auto_switch": !s.auto_switch_off,
         "away_lights": s.away_lights.as_deref().unwrap_or(""),
+        "spectrum_wake_sync": s.spectrum_wake_sync,
         "synapse": engine.synapse(),
     })
 }
@@ -611,6 +627,7 @@ fn app_post(engine: &mut Engine, path: &str, b: &Body) -> Option<Result<Value, E
                     s.battery_warning_at = Some(b.value);
                 }
                 "auto_switch" => s.auto_switch_off = !b.on,
+                "spectrum_wake_sync" => s.spectrum_wake_sync = b.on,
                 // `data`: "dim", "off", or "" to leave the lights as they are.
                 "away_lights" => {
                     let want = b.data.as_str().unwrap_or_default();

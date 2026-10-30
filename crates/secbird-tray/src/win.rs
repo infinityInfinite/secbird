@@ -1,4 +1,5 @@
-use crate::engine::{ApplyReport, Battery, Engine, LightsRetry, DIM_FOR, RELIGHT_FOR};
+use crate::engine::{describe_writes, ApplyReport, Battery, Engine, LightsRetry, DIM_FOR, RELIGHT_FOR};
+use crate::wake_sync::{self, Job, Outcome, Plan, WakeSync};
 use secbird_core::log;
 use std::collections::{HashMap, HashSet};
 use crate::settings::{autostart_enabled, open_config_folder, set_autostart, TraySettings};
@@ -12,7 +13,7 @@ use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -21,6 +22,7 @@ use windows_sys::Win32::System::RemoteDesktop::{WTSRegisterSessionNotification, 
 use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+use windows_sys::Win32::UI::Input::*;
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -75,6 +77,9 @@ const BUTTONS_AGAIN_SECS: u64 = 60;
 /// set to stay lit get a read on the same beat (#34).
 const TIMER_LIGHTS: usize = 7;
 const LIGHTS_MS: u32 = 3_000;
+/// Spectrum restarted on the devices together after one wakes (see `wake_sync`): armed by
+/// each wake, each profile the tray sends by itself, and each retry.
+const TIMER_SPECTRUM_WAKE: usize = 8;
 
 const ID_REAPPLY: u32 = 1;
 const ID_FOLDER: u32 = 2;
@@ -136,6 +141,12 @@ struct App {
     /// The session is locked, or the screen is off: the lights go down if set (#48).
     locked: bool,
     screen_off: bool,
+    /// Spectrum re-sync on wake is on: set at start, once Raw Input is registered.
+    wake_sync_on: bool,
+    /// Raw Input hDevice -> Razer product id (`None`: not Razer), looked up once per handle
+    /// and forgotten when Windows says the device went away.
+    raw_devices: HashMap<isize, Option<u16>>,
+    wake_sync: WakeSync,
 }
 
 /// What clicking a notification does.
@@ -318,9 +329,16 @@ pub fn run() {
                 installs,
                 locked: false,
                 screen_off: false,
+                wake_sync_on: false,
+                raw_devices: HashMap::new(),
+                wake_sync: WakeSync::default(),
             })
         });
         log::append("tray started");
+        // After the app exists, so the device arrivals Windows reports right away are seen.
+        if TraySettings::load().spectrum_wake_sync && register_wake_raw_input(hwnd) {
+            with_app(|app| app.wake_sync_on = true);
+        }
         with_app(|app| app.announce_updated());
         with_app(|app| app.rescan());
         start_retries(hwnd);
@@ -363,6 +381,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_DEVICE_EVENT => {
             with_app(|app| app.device_events());
+            0
+        }
+        WM_INPUT => {
+            with_app(|app| app.raw_input(lparam));
+            // Required for foreground raw input cleanup; harmless for INPUTSINK.
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_INPUT_DEVICE_CHANGE => {
+            with_app(|app| app.raw_device_change(wparam as u32, lparam as HANDLE));
             0
         }
         WM_FIRMWARE => {
@@ -466,14 +493,27 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_TIMER if wparam == TIMER_LIGHTS => {
             with_app(|app| {
-                let mut engine = app.engine();
-                let relit = engine.retry_lights_back();
-                let dimmed = engine.retry_lights_away();
-                log_retry(&engine, "back", &relit);
-                log_retry(&engine, "away", &dimmed);
-                engine.refresh_frames();
-                engine.keep_laptops_lit();
+                let relit = {
+                    let mut engine = app.engine();
+                    let relit = engine.retry_lights_back();
+                    let dimmed = engine.retry_lights_away();
+                    log_retry(&engine, "back", &relit);
+                    log_retry(&engine, "away", &dimmed);
+                    engine.refresh_frames();
+                    engine.keep_laptops_lit();
+                    relit.done
+                };
+                app.spectrum_applied(&relit);
             });
+            0
+        }
+        WM_TIMER if wparam == TIMER_SPECTRUM_WAKE => {
+            KillTimer(hwnd, TIMER_SPECTRUM_WAKE);
+            // The app is busy (re-entered from a nested message loop): try again shortly
+            // rather than lose the wake.
+            if with_app(|app| app.spectrum_due()).is_none() {
+                SetTimer(hwnd, TIMER_SPECTRUM_WAKE, SETTLE_MS, None);
+            }
             0
         }
         WM_TIMER if wparam == TIMER_FOREGROUND => {
@@ -499,6 +539,26 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     }
 }
 
+/// Register as a background observer (never RIDEV_NOLEGACY) so Windows keeps
+/// delivering ordinary mouse and keyboard input to the user's applications.
+/// RIDEV_DEVNOTIFY adds WM_INPUT_DEVICE_CHANGE, so handles of devices that go are dropped.
+unsafe fn register_wake_raw_input(hwnd: HWND) -> bool {
+    let flags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    let devices = [
+        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: flags, hwndTarget: hwnd },
+        RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: flags, hwndTarget: hwnd },
+    ];
+    if RegisterRawInputDevices(devices.as_ptr(), devices.len() as u32, size_of::<RAWINPUTDEVICE>() as u32) == 0 {
+        log::append(&format!(
+            "Spectrum wake: failed to register Raw Input (error {}); manual synchronization remains available",
+            GetLastError()
+        ));
+        return false;
+    }
+    log::append("Spectrum wake: background Raw Input enabled for mouse and keyboard");
+    true
+}
+
 /// Log what a retry of the lights while away (or back) did, if anything.
 fn log_retry(engine: &Engine, what: &str, retry: &LightsRetry) {
     if !retry.done.is_empty() {
@@ -515,6 +575,23 @@ fn missed_note(engine: &Engine, missed: &[String], window: Duration) -> String {
         return String::new();
     }
     format!("; not answering: {}, trying again for {} s", engine.names(missed), window.as_secs())
+}
+
+/// The device path of a Raw Input device, such as `\\?\HID#VID_1532&PID_02C9&MI_02#...`.
+unsafe fn raw_input_device_name(device: HANDLE) -> Option<String> {
+    if device.is_null() {
+        return None;
+    }
+    let mut chars = 0u32;
+    if GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, null_mut(), &mut chars) == u32::MAX || chars == 0 || chars > 1024 {
+        return None;
+    }
+    let mut buffer = vec![0u16; chars as usize];
+    if GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, buffer.as_mut_ptr().cast(), &mut chars) == u32::MAX {
+        return None;
+    }
+    let end = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..end]))
 }
 
 /// A window came to the front: (re)start the settle timer.
@@ -543,26 +620,52 @@ impl App {
     }
 
     fn rescan(&mut self) {
+        let (applied, all) = self.rescan_devices();
+        // When every device got its profile, their Spectrum restarted together; a device
+        // back from sleep got it alone, out of step with the others.
+        if !all {
+            self.spectrum_applied(&applied);
+        }
+    }
+
+    /// Re-enumerate, and send their profile to new devices (every device when pending).
+    /// Returns the keys of the devices sent their profile, and whether that was all of them.
+    fn rescan_devices(&mut self) -> (Vec<String>, bool) {
         let apply_all = std::mem::take(&mut self.apply_all_pending);
-        let (reports, new_names, synapse) = {
+        let (reports, targets, new_names, gone, synapse) = {
             let mut engine = self.engine();
+            let before: Vec<(String, String)> = engine.devices().iter().map(|d| (d.key(), engine.label(d))).collect();
             let new = engine.rescan();
             let names: Vec<String> =
                 engine.devices().iter().filter(|d| new.contains(&d.key())).map(|d| engine.label(d)).collect();
+            let gone: Vec<String> = before
+                .into_iter()
+                .filter(|(key, _)| !engine.devices().iter().any(|d| d.key() == *key))
+                .map(|(_, name)| name)
+                .collect();
             let targets = if apply_all { engine.all_keys() } else { new };
-            (engine.apply(&targets), names, engine.synapse().to_vec())
+            (engine.apply(&targets), targets, names, gone, engine.synapse().to_vec())
         };
         if !new_names.is_empty() {
             log::append(&format!("found: {}", new_names.join(", ")));
+        }
+        // So a wireless device dropped from the list while asleep shows in the log.
+        if !gone.is_empty() {
+            log::append(&format!("gone: {} (asleep or unplugged)", gone.join(", ")));
         }
         self.notify_failures(&reports);
         self.warn_synapse(&synapse);
         self.check_battery();
         self.start_listeners();
+        if self.wake_sync_on {
+            let peers = self.engine().wake_peers();
+            self.wake_sync.set_peers(peers);
+        }
         // A device that arrives (or wakes) while the PC is locked comes up lit.
         if let Some(percent) = TraySettings::load().away_percent().filter(|_| self.engine().is_away()) {
             self.engine().lights_away(percent);
         }
+        (targets, apply_all)
     }
 
     /// The lights go down while the PC is locked or its screen is off, if that's set (#48),
@@ -578,6 +681,8 @@ impl App {
                 log::append(&format!("{why}: lights to {percent}%{}", missed_note(&engine, &missed, DIM_FOR)));
             }
             None if engine.is_away() => {
+                // Every device that answers gets its profile at once, so their Spectrum
+                // restarts together; one that misses it is synced when it answers later.
                 let missed = engine.lights_back();
                 log::append(&format!("back: lights as saved{}", missed_note(&engine, &missed, RELIGHT_FOR)));
             }
@@ -623,6 +728,183 @@ impl App {
                 log::append("could not start a device event listener");
             }
         }
+    }
+
+    /// Only raw input from a Razer device the tray knows counts. Reads the event's header,
+    /// never an HID report: nothing is sent to any device from here.
+    fn raw_input(&mut self, lparam: LPARAM) {
+        if !self.wake_sync_on {
+            return;
+        }
+        let mut header: RAWINPUTHEADER = unsafe { zeroed() };
+        let mut size = size_of::<RAWINPUTHEADER>() as u32;
+        let got = unsafe {
+            GetRawInputData(
+                lparam as HRAWINPUT,
+                RID_HEADER,
+                (&mut header as *mut RAWINPUTHEADER).cast(),
+                &mut size,
+                size_of::<RAWINPUTHEADER>() as u32,
+            )
+        };
+        if got == u32::MAX || got != size_of::<RAWINPUTHEADER>() as u32 {
+            return;
+        }
+        if header.dwType != RIM_TYPEMOUSE && header.dwType != RIM_TYPEKEYBOARD {
+            return;
+        }
+        let Some(pid) = self.raw_pid(header.hDevice) else { return };
+        let now = Instant::now();
+        let Some(wake) = self.wake_sync.input(pid, now) else { return };
+        if !TraySettings::load().spectrum_wake_sync {
+            // Turned off in the editor since the tray started.
+            self.wake_sync.finish(Outcome::Done);
+            return;
+        }
+        let quiet = wake.idle.map_or_else(|| "first input seen".to_string(), |idle| format!("after {} s quiet", idle.as_secs()));
+        log::append(&format!("Spectrum wake: {:04X} woke ({quiet}); {}", wake.pid, self.wake_sync.describe(now)));
+        self.arm_spectrum(wake_sync::SETTLE);
+    }
+
+    /// The Razer product id of a Raw Input device, looked up once per handle.
+    fn raw_pid(&mut self, device: HANDLE) -> Option<u16> {
+        let handle = device as isize;
+        if let Some(pid) = self.raw_devices.get(&handle) {
+            return *pid;
+        }
+        let path = unsafe { raw_input_device_name(device) };
+        let pid = path.as_deref().and_then(wake_sync::razer_pid);
+        if let (Some(pid), Some(path)) = (pid, &path) {
+            log::append(&format!(
+                "Spectrum wake: raw input device {handle:#x} is Razer {pid:04X} {}",
+                wake_sync::collection(path)
+            ));
+        }
+        self.raw_devices.insert(handle, pid);
+        pid
+    }
+
+    /// Windows says a Raw Input device came or went (RIDEV_DEVNOTIFY). Razer ones are logged,
+    /// to see whether a receiver's collections come and go while its device sleeps.
+    fn raw_device_change(&mut self, change: u32, device: HANDLE) {
+        let handle = device as isize;
+        if change == GIDC_REMOVAL {
+            if let Some(Some(pid)) = self.raw_devices.remove(&handle) {
+                log::append(&format!("Spectrum wake: raw input device {handle:#x} (Razer {pid:04X}) removed"));
+            }
+        } else if change == GIDC_ARRIVAL {
+            // Windows can hand a freed handle to another device: look it up again.
+            self.raw_devices.remove(&handle);
+            self.raw_pid(device);
+        }
+    }
+
+    fn arm_spectrum(&self, delay: Duration) {
+        unsafe { SetTimer(self.hwnd, TIMER_SPECTRUM_WAKE, delay.as_millis() as u32, None) };
+    }
+
+    /// Product ids of the devices with these keys.
+    fn pids_of(&self, keys: &[String]) -> Vec<u16> {
+        self.engine().devices().iter().filter(|d| keys.contains(&d.key())).map(|d| d.pid).collect()
+    }
+
+    /// The tray sent these devices their profile by itself (back in a rescan, or answering
+    /// after the lights came back). That restarted their Spectrum alone: restart it on the
+    /// awake devices with them.
+    fn spectrum_applied(&mut self, keys: &[String]) {
+        if !self.wake_sync_on || keys.is_empty() {
+            return;
+        }
+        let pids = self.pids_of(keys);
+        if TraySettings::load().spectrum_wake_sync && self.wake_sync.applied(&pids) {
+            log::append(&format!("Spectrum wake: {} got its profile again; syncing", wake_sync::list(&pids)));
+            self.arm_spectrum(wake_sync::SETTLE);
+        }
+    }
+
+    /// The Spectrum timer fired: one attempt (see [`wake_sync`]).
+    fn spectrum_due(&mut self) {
+        let Some(mut job) = self.wake_sync.start() else { return };
+        // Sleep timers may have changed in the editor since the last rescan.
+        let peers = self.engine().wake_peers();
+        self.wake_sync.set_peers(peers);
+        // A retry after a write that didn't take: reopen the handles first, in case the
+        // receiver came back as a new device.
+        let rescanned = job.attempt > 1;
+        if rescanned {
+            self.rescan_for_spectrum(&mut job);
+        }
+        let mut plan = self.spectrum_plan(&job);
+        if !rescanned && matches!(plan, Plan::Missing(_)) {
+            if let Plan::Missing(missing) = &plan {
+                log::append(&format!(
+                    "Spectrum wake: {} isn't in the device list (dropped while asleep?): rescanning",
+                    wake_sync::list(missing)
+                ));
+            }
+            self.rescan_for_spectrum(&mut job);
+            plan = self.spectrum_plan(&job);
+        }
+        let outcome = match plan {
+            Plan::Write { order, strict } => {
+                let writes = self.engine().restart_spectrum(&order, strict);
+                let not_ready = writes.iter().any(|w| w.result.is_err() && order[..strict].contains(&w.pid));
+                log::append(&format!(
+                    "Spectrum wake: attempt {} on {}: {}",
+                    job.attempt,
+                    wake_sync::list(&order),
+                    describe_writes(&writes)
+                ));
+                if not_ready {
+                    Outcome::NotReady
+                } else {
+                    Outcome::Done
+                }
+            }
+            Plan::Missing(missing) => {
+                log::append(&format!(
+                    "Spectrum wake: attempt {}: {} still not in the device list",
+                    job.attempt,
+                    wake_sync::list(&missing)
+                ));
+                Outcome::NotReady
+            }
+            Plan::Wait(why) => {
+                log::append(&format!("Spectrum wake: attempt {}: nothing written, {why}", job.attempt));
+                Outcome::Done
+            }
+        };
+        match self.wake_sync.finish(outcome) {
+            Some(delay) => {
+                log::append(&format!("Spectrum wake: trying again in {} s", delay.as_secs()));
+                self.arm_spectrum(delay);
+            }
+            None if outcome == Outcome::NotReady => log::append("Spectrum wake: giving up until the next wake"),
+            None => {}
+        }
+    }
+
+    /// What to write for `job`, from the devices the tray has now.
+    fn spectrum_plan(&self, job: &Job) -> Plan {
+        let engine = self.engine();
+        let present: Vec<u16> = engine.devices().iter().map(|d| d.pid).collect();
+        match engine.spectrum_pids() {
+            Ok(spectrum) => self.wake_sync.plan(job, &present, &spectrum, Instant::now()),
+            Err(why) => Plan::Wait(why),
+        }
+    }
+
+    /// Rescan within an attempt. Devices it sends their profile to restarted their Spectrum
+    /// alone, so they are written first along with the devices that woke.
+    fn rescan_for_spectrum(&mut self, job: &mut Job) {
+        let (applied, _) = self.rescan_devices();
+        let pids = self.pids_of(&applied);
+        for &pid in &pids {
+            if !job.woke.contains(&pid) {
+                job.woke.push(pid);
+            }
+        }
+        self.wake_sync.applied(&pids);
     }
 
     fn device_events(&mut self) {
