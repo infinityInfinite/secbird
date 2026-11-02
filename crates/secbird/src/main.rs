@@ -1,6 +1,8 @@
 use secbird_core::{actions, config_dir, discover, hidapi::HidApi, Db, Device, Error, Rgb, Store};
 use std::process::ExitCode;
 
+mod listen;
+
 const USAGE: &str = "\
 Secretarybird - minimal control for Razer peripherals
 
@@ -16,6 +18,15 @@ DEVICE:
                             (apps.razer.com); never installs anything
   report [--json]           Read-only description of connected Razer hardware, to share
                             when a device is missing or misbehaves (serials shortened)
+  stickmode [analog|4way|8way]
+                            Tartarus V2 Pro: show or set the stick's mode, as Synapse does
+  devmode [normal|driver]   Show or set the device mode; driver is what Synapse sets when it
+                            starts (unplugging the device puts it back to normal)
+  stickturn [default|rotated]  Show or set Synapse's Thumbstick Orientation: the keypad turns
+                            the stick a quarter turn clockwise (analog mode)
+  listen [keys] [PID]       Read-only: record what a device sends (default Tartarus V2 Pro, 02EB);
+                            with keys: one recording while you press keys, no Synapse steps
+                            while you follow the steps; saves a log in the settings folder
   dock-test <red|spectrum|battery|off>
                             Test: set a mouse dock's own light once (#39)
 
@@ -70,6 +81,21 @@ KEYS (keyboards and keypads; BETA, no keyboard has confirmed it works yet; --hyp
         scrolllock pause numlock num0-num9 num-slash num-star num-minus num-plus num-enter
         num-period iso-hash iso-backslash
 
+THUMBSTICK (Tartarus V2 Pro; the tray presses the keys while it runs):
+  stick                     Show the thumbstick settings of the active profile
+  stick on | off            Turn the stick into keys (WASD), or leave it a game controller
+  stick <name=value ...>    Change settings, any of:
+                              rotation=0-359   where forward is, degrees clockwise from
+                                               the stick's own up (the editor shows it live)
+                              deadzone=5-90    percent of travel before a key goes down
+                              diagonal=0-80    degrees where two keys are held (W+A);
+                                               0 = 4-way, 45 = even 8-way
+                              keys=w,d,s,a     up,right,down,left (key names as above;
+                                               empty for none, e.g. keys=w,,s,)
+                            e.g. `stick rotation=315 diagonal=50`
+                            On puts the keypad in 8-way and driver mode; off makes the
+                            stick a game controller again.
+
 MACROS (stored on the device, shared by all profiles):
   macro [list]              Macros on the device and free memory
   macro show <id>           A macro's steps
@@ -105,7 +131,7 @@ OPTIONS:
   -d ID    Pick a device by USB product id (0099) or serial, when several are connected
 
 Set SECBIRD_SIM=all (or a list: mouse,wireless,keyboard,old-keyboard,naga,cobra,dock,blackwidow,
-goliathus,firefly,blade,base-station) to add simulated devices (no hardware needed).
+goliathus,firefly,blade,base-station,tartarus) to add simulated devices (no hardware needed).
 
 Files live in %APPDATA%\\Secretarybird (profiles.json, devices.json).
 ";
@@ -205,6 +231,12 @@ Download: {}", r.version, secbird_core::update::CURRENT, r.url),
         return Ok(());
     }
 
+    if command == "listen" {
+        let keys = args.get(1).is_some_and(|a| a == "keys");
+        let pid = args.iter().skip(1).find_map(|p| u16::from_str_radix(p, 16).ok());
+        return listen::run(&api, &devices, pid, keys);
+    }
+
     if command == "dock-test" {
         return dock_test(&devices, args.get(1).map(String::as_str));
     }
@@ -299,6 +331,9 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
         [] => return Err(Error::NotFound("no matching Razer device".into())),
         [one] => one,
         _ if command == "key" && keyboards.len() == 1 => keyboards[0],
+        _ if command == "stick" && devices.iter().filter(|d| has_stick(d)).count() == 1 => {
+            devices.iter().find(|d| has_stick(d)).expect("counted above")
+        }
         _ => {
             return Err(Error::InvalidArg(
                 "several devices connected; pick one with -d PID or -d SERIAL (see `secbird list`)".into(),
@@ -422,6 +457,10 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
             }
         },
         "macro" => macro_cmd(dev, &mut store, rest),
+        "devmode" => devmode_cmd(dev, rest),
+        "stickmode" => stickmode_cmd(dev, rest),
+        "stickturn" => stickturn_cmd(dev, &mut store, rest),
+        "stick" => stick_cmd(dev, &mut store, rest),
         "poll" => match rest.first() {
             None => {
                 println!("{} Hz", dev.polling_rate()?);
@@ -513,6 +552,9 @@ fn profile_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), E
             }
             if let Some(g) = &p.game_mode {
                 println!("  gaming     {g}");
+            }
+            if let Some(st) = &p.stick {
+                println!("  stick      {}", st.summary());
             }
             for (zone, z) in &p.lighting {
                 let state = match (z.off, z.color) {
@@ -788,6 +830,108 @@ fn report_apply(results: Vec<secbird_core::profile::Applied>) -> Result<(), Erro
     }
     if failed > 0 {
         return Err(Error::Unsupported(format!("{failed} setting(s) could not be applied")));
+    }
+    Ok(())
+}
+
+/// Show or set the device mode (00:04): normal, or driver mode (3), the one Synapse sets when
+/// it starts. The Tartarus V2 Pro only reports its stick's position in 4-way/8-way mode while
+/// in driver mode (#21). Unplugging the device puts it back to normal.
+/// Synapse's Thumbstick Orientation: the keypad turns its stick a quarter turn clockwise itself
+/// (analog mode). 02:45 `[01, 01]` rotated, `[01, 00]` as it comes.
+fn stickturn_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
+    match rest.first().map(String::as_str) {
+        None => {}
+        Some("rotated") => actions::set_stick_rotated(dev, store, true)?,
+        Some("default") => actions::set_stick_rotated(dev, store, false)?,
+        Some(_) => return Err(Error::InvalidArg("usage: stickturn [default|rotated]".into())),
+    }
+    let rotated = dev.stick_rotated()?;
+    println!("Thumbstick orientation: {}", if rotated { "rotated a quarter turn clockwise" } else { "default" });
+    Ok(())
+}
+
+fn devmode_cmd(dev: &Device, rest: &[String]) -> Result<(), Error> {
+    use secbird_core::commands::{DEVICE_MODE, DEVICE_MODE_SIZE};
+    let show = |dev: &Device| -> Result<(), Error> {
+        let r = dev.get(DEVICE_MODE, DEVICE_MODE_SIZE, &[])?;
+        let (mode, param) = (r.args()[0], r.args()[1]);
+        let name = match mode {
+            0 => "normal",
+            3 => "driver",
+            _ => "other",
+        };
+        println!("Device mode: {name} ({mode:02X} {param:02X})");
+        Ok(())
+    };
+    let mode = match rest.first().map(String::as_str) {
+        None => return show(dev),
+        Some("normal") => 0x00,
+        Some("driver") => 0x03,
+        Some(_) => return Err(Error::InvalidArg("usage: devmode [normal|driver]".into())),
+    };
+    println!("Sending 00:04 [{mode:02X} 00] to {}", dev.name());
+    dev.transact(DEVICE_MODE, DEVICE_MODE_SIZE, &[mode, 0x00])?;
+    show(dev)
+}
+
+/// Show or set the Tartarus V2 Pro's thumbstick mode the way Synapse does (#21).
+fn stickmode_cmd(dev: &Device, rest: &[String]) -> Result<(), Error> {
+    use secbird_core::stick::Mode;
+    if !has_stick(dev) {
+        return Err(Error::Unsupported(format!("{} has no thumbstick", dev.name())));
+    }
+    let mode = match rest.first().map(String::as_str) {
+        None => None,
+        Some("analog") => Some(Mode::Analog),
+        Some("4way" | "4-way") => Some(Mode::FourWay),
+        Some("8way" | "8-way") => Some(Mode::EightWay),
+        Some(_) => return Err(Error::InvalidArg("usage: stickmode [analog|4way|8way]".into())),
+    };
+    if let Some(mode) = mode {
+        println!("Setting {} to {mode:?} (02:38, then 02:39 for profile 1)", dev.name());
+        dev.set_stick_mode(mode)?;
+    }
+    match dev.stick_mode()? {
+        Some(mode) => println!("Stick mode: {mode:?}"),
+        None => println!("Stick mode: other (not one Synapse sets)"),
+    }
+    Ok(())
+}
+
+fn has_stick(dev: &Device) -> bool {
+    dev.spec.as_ref().is_some_and(|s| s.thumbstick)
+}
+
+fn stick_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
+    let current = store.for_device(dev).active().stick.clone();
+    // Settings kept from when the stick was turned off.
+    let kept = || store.for_device(dev).active().stick_off.clone().unwrap_or_default();
+    let stick = match rest.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] => {
+            if !has_stick(dev) {
+                return Err(Error::Unsupported(format!("{} has no thumbstick", dev.name())));
+            }
+            current
+        }
+        ["off"] => actions::set_stick(dev, store, None)?,
+        ["on"] => {
+            let stick = current.unwrap_or_else(kept);
+            actions::set_stick(dev, store, Some(stick))?
+        }
+        settings => {
+            let mut stick = current.unwrap_or_else(kept);
+            stick.apply_text(&settings.join(" "))?;
+            actions::set_stick(dev, store, Some(stick))?
+        }
+    };
+    let profile = &store.for_device(dev).active;
+    match stick {
+        None => println!("Thumbstick: off, left as a game controller ({profile})"),
+        Some(s) => {
+            println!("Thumbstick: {} ({profile})", s.summary());
+            println!("The tray presses the keys while it runs.");
+        }
     }
     Ok(())
 }

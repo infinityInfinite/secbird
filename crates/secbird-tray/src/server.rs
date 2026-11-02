@@ -226,6 +226,7 @@ impl Server {
                 Ok(state(&engine))
             }
             ("GET", "/api/settings") => Ok(settings_json(&engine)),
+            ("GET", "/api/stick-live") => Ok(json!(engine.stick().watch())),
             ("GET", "/api/export") => Store::load(&config_dir().join("profiles.json"))
                 .and_then(|s| serde_json::to_value(&s).map_err(|e| Error::Db(e.to_string()))),
             ("POST", path) => post(&mut engine, path, &req.body),
@@ -314,6 +315,9 @@ struct Body {
     /// Lighting effect text (`spectrum`, `wave:left@3`).
     #[serde(default)]
     effect: String,
+    /// Thumbstick settings, with `on`.
+    #[serde(default)]
+    stick: Option<secbird_core::stick::Stick>,
 }
 
 /// Every button of a mouse with what it does on each layer, and which ones the active
@@ -501,6 +505,17 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 actions::set_button(dev, &mut store, &b.button, layer, action)?;
                 Ok(buttons_json(dev, &mut store))
             }
+            "/api/stick-rotated" => {
+                let rotated = b.enabled.ok_or_else(|| Error::InvalidArg("enabled must be a boolean".into()))?;
+                actions::set_stick_rotated(dev, &mut store, rotated)?;
+                Ok(json!({ "stick_rotated": rotated }))
+            }
+            "/api/stick" => {
+                let want = b.on.then(|| b.stick.clone().unwrap_or_default());
+                let stick = actions::set_stick(dev, &mut store, want)?;
+                engine.refresh_stick();
+                Ok(json!({ "stick": stick }))
+            }
             "/api/profile" => {
                 let profiles = store.for_device(dev);
                 match b.action.as_str() {
@@ -513,6 +528,7 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 let switched = b.action == "use";
                 let profiles = profiles.clone();
                 store.save()?;
+                engine.refresh_stick();
                 let failures: Vec<String> = if switched {
                     profiles
                         .apply(&profiles.active, dev)
@@ -735,6 +751,9 @@ fn device_json(dev: &Device) -> Value {
         "name": dev.name(),
         "kind": kind,
         "known": spec.is_some(),
+        "thumbstick": spec.is_some_and(|s| s.thumbstick),
+        // Synapse's Thumbstick Orientation, as the keypad has it now (analog mode).
+        "stick_rotated": if spec.is_some_and(|s| s.thumbstick) { dev.stick_rotated().ok() } else { None },
         "lighting_control": lighting_control,
         "firmware": dev.firmware_version().ok(),
         // Read once at discovery; asking the device again costs a USB round trip per page load.

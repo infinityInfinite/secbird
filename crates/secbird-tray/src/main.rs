@@ -14,6 +14,8 @@ mod server;
 #[cfg(windows)]
 mod settings;
 #[cfg(windows)]
+mod stick;
+#[cfg(windows)]
 mod win;
 
 #[cfg(windows)]

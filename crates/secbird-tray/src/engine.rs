@@ -26,6 +26,8 @@ pub struct Engine {
     relight: HashMap<String, Instant>,
     /// Devices that didn't answer [`Engine::lights_away`], and until when to keep trying.
     dim: HashMap<String, Instant>,
+    /// Thumbstick as keys: the settings in force, shared with the thread that reads the stick.
+    stick: std::sync::Arc<crate::stick::Shared>,
 }
 
 const FINDER_PAUSE: Duration = Duration::from_secs(10 * 60);
@@ -92,7 +94,34 @@ impl Engine {
             away: None,
             relight: HashMap::new(),
             dim: HashMap::new(),
+            stick: Default::default(),
         })
+    }
+
+    /// Whether the device with this key has a thumbstick (its analog reports carry it).
+    pub fn has_thumbstick(&self, key: &str) -> bool {
+        self.devices.iter().any(|d| d.key() == key && d.spec.as_ref().is_some_and(|s| s.thumbstick))
+    }
+
+    pub fn stick(&self) -> &std::sync::Arc<crate::stick::Shared> {
+        &self.stick
+    }
+
+    /// Hand the stick thread the thumbstick settings of the keypad's current profile (the
+    /// one tied to the program in front, else the active one). Called whenever devices or
+    /// profiles may have changed.
+    pub fn refresh_stick(&self) {
+        let keypads: Vec<&Device> =
+            self.devices.iter().filter(|d| d.spec.as_ref().is_some_and(|s| s.thumbstick)).collect();
+        let stick = match (keypads.first(), Self::store()) {
+            (Some(dev), Ok(mut store)) => {
+                let p = store.for_device(dev);
+                let name = p.effective(self.foreground()).to_string();
+                p.profiles.get(&name).and_then(|p| p.stick.clone())
+            }
+            _ => None,
+        };
+        self.stick.set(stick, keypads.iter().map(|d| d.pid).collect());
     }
 
     pub fn foreground(&self) -> Option<&str> {
@@ -397,6 +426,7 @@ impl Engine {
             })
             .collect();
         self.synapse = secbird_core::debloat::synapse_running();
+        self.refresh_stick();
         self.devices.iter().map(|d| d.key()).filter(|k| !before.contains(k)).collect()
     }
 
@@ -429,6 +459,7 @@ impl Engine {
     /// Apply the current profile of each listed device (by [`Device::key`]): the one tied
     /// to the program in front, else the active one.
     pub fn apply(&self, keys: &[String]) -> Vec<ApplyReport> {
+        self.refresh_stick();
         let mut store = Self::store();
         self.devices
             .iter()

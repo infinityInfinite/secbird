@@ -106,6 +106,10 @@ pub struct DeviceSpec {
     pub wireless: bool,
     #[serde(default)]
     pub onboard_profiles: u8,
+    /// Has a thumbstick that reads as a game controller in True Analog mode, which the
+    /// tray can turn into keys (see [`crate::stick`]).
+    #[serde(default)]
+    pub thumbstick: bool,
     /// Where this entry's facts come from (e.g. "synapse-descriptor", "openrazer").
     #[serde(default)]
     pub source: String,

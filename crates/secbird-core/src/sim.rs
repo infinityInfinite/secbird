@@ -114,6 +114,14 @@ pub struct SimState {
     pub busy_reads: u32,
     /// Every well-formed command received, in order.
     pub log: Vec<Command>,
+    /// Every well-formed SET received, as `[size, class, id, arguments...]` with the
+    /// arguments cut to the size: the bytes after the transaction id and the zeros.
+    pub sent: Vec<Vec<u8>>,
+    /// Device mode (00:04) and stick report and mapping modes (02:38, 02:39), on a keypad
+    /// with a stick: `[mode, param]`, `[report]`, `[profile, mapping]`.
+    pub stick_modes: Option<([u8; 2], u8, u8)>,
+    /// Thumbstick orientation option of profile 1 (02:45), on a keypad with a stick.
+    pub stick_orientation: u8,
     reply: Option<Report>,
 }
 
@@ -153,6 +161,9 @@ impl SimState {
             keys: BTreeMap::new(),
             busy_reads: 0,
             log: Vec::new(),
+            sent: Vec::new(),
+            stick_modes: None,
+            stick_orientation: 0,
             reply: None,
         }
     }
@@ -318,6 +329,29 @@ impl SimState {
                 None if self.keys.is_empty() => (NotSupported, vec![]),
                 None => (Failed, vec![]),
             },
+            cmd::DEVICE_MODE if self.stick_modes.is_some() => {
+                if let Some(m) = &mut self.stick_modes {
+                    m.0 = [a[0], a[1]];
+                }
+                ok(a[..2].to_vec())
+            }
+            c if c == Command::new(0x02, 0x38) && self.stick_modes.is_some() => {
+                if let Some(m) = &mut self.stick_modes {
+                    m.1 = a[0];
+                }
+                ok(a[..1].to_vec())
+            }
+            c if c == Command::new(0x02, 0x39) && self.stick_modes.is_some() => {
+                if let Some(m) = &mut self.stick_modes {
+                    m.2 = a[1];
+                }
+                ok(a[..2].to_vec())
+            }
+            c if c == Command::new(0x02, 0x45) && self.stick_modes.is_some() => {
+                self.stick_orientation = a[1];
+                ok(a[..2].to_vec())
+            }
+            c if c == Command::new(0x02, 0xC5) && self.stick_modes.is_some() => ok(vec![a[0], self.stick_orientation]),
             cmd::KEY => {
                 if !self.keys.contains_key(&(1, a[1], a[2])) {
                     return (if self.keys.is_empty() { NotSupported } else { Failed }, vec![]);
@@ -709,6 +743,10 @@ impl Transport for Sim {
             s.handle_dock(command, req.args(), body[5])
         } else {
             s.log.push(command);
+            if command.id & 0x80 == 0 {
+                let size = usize::from(body[5]).min(80);
+                s.sent.push(body[5..8 + size].to_vec());
+            }
             s.handle(command, req.args(), body[5])
         };
         let mut reply = Report::request(req.txid(), command, body[5], &args);
@@ -766,8 +804,8 @@ pub fn from_env() -> Vec<Device> {
 }
 
 /// Every preset `SECBIRD_SIM=all` loads.
-pub const PRESETS: [&str; 14] =
-    ["mouse", "wireless", "keyboard", "old-keyboard", "naga", "cobra", "dock", "dock-v2", "hyperpolling", "blackwidow", "goliathus", "firefly", "blade", "base-station"];
+pub const PRESETS: [&str; 15] =
+    ["mouse", "wireless", "keyboard", "old-keyboard", "naga", "cobra", "dock", "dock-v2", "hyperpolling", "blackwidow", "goliathus", "firefly", "blade", "base-station", "tartarus"];
 
 /// A simulated device by name. The later ones copy devices users reported, under their real
 /// product ids, so the editor treats them exactly as it treats the hardware.
@@ -863,6 +901,16 @@ pub fn preset(name: &str) -> Option<(Sim, u16)> {
             // Smart Dimming on, going dark when idle, as in issue #20.
             s.smart_dimming = Some((1, 2));
             (Sim::new(s), 0x026D)
+        }
+        // Tartarus V2 Pro, issue #21: keypad with a thumbstick (the stick itself is read by the
+        // tray through XInput, which this doesn't simulate).
+        "tartarus" => {
+            let mut s = SimState::new("SIMTARTARUS1");
+            s.polling_hs = Some(0x08);
+            s.leds = vec![5];
+            s.macros = Some(BTreeMap::new());
+            s.stick_modes = Some(([0, 0], 0, 0));
+            (Sim::new(s), 0x02EB)
         }
         // Base Station V2 Chroma, issue #6.
         "base-station" => {
@@ -1446,6 +1494,60 @@ mod tests {
         assert!(matches!(dev.set_brightness(7, 50), Err(Error::Device { status: Status::Failed, .. })));
         let kb = open(&Sim::keyboard(), KEYBOARD_PID);
         assert!(matches!(kb.dpi(), Err(Error::Device { status: Status::NotSupported, .. })));
+    }
+
+    #[test]
+    fn tartarus_stick_off_keeps_its_settings_and_normal_mode() {
+        let (sim, pid) = preset("tartarus").unwrap();
+        let dev = sim.open(pid, crate::db::Db::builtin().unwrap().spec(pid)).expect("simulator answers");
+        let dir = std::env::temp_dir().join(format!("secbird-stick-{}", std::process::id()));
+        let mut store = crate::Store::load(&dir.join("profiles.json")).unwrap();
+        let mine = crate::stick::Stick { rotation: 327, deadzone: 21, ..Default::default() };
+
+        sim.state().stick_orientation = 1; // rotated in Synapse
+        crate::actions::set_stick(&dev, &mut store, Some(mine.clone())).unwrap();
+        assert_eq!(sim.state().stick_modes, Some(([3, 0], 1, 2)), "driver mode, 8-way");
+        assert_eq!(sim.state().stick_orientation, 0, "key mode reads the stick unturned");
+        assert_eq!(store.for_device(&dev).active().stick_rotated, Some(true), "the analog setting kept");
+        // Changed while in key mode: saved for analog mode, the keypad stays unturned.
+        crate::actions::set_stick_rotated(&dev, &mut store, true).unwrap();
+        assert_eq!(sim.state().stick_orientation, 0);
+
+        crate::actions::set_stick(&dev, &mut store, None).unwrap();
+        assert_eq!(sim.state().stick_modes, Some(([0, 0], 0, 0)), "normal mode, analog: the keypad's own keymap works");
+        assert_eq!(sim.state().stick_orientation, 1, "analog orientation back");
+        let p = store.for_device(&dev).active().clone();
+        assert_eq!((p.stick, p.stick_off.as_ref()), (None, Some(&mine)), "the angle is kept while off");
+
+        // Back on with what was kept (the editor and `secbird stick on` send it).
+        crate::actions::set_stick(&dev, &mut store, p.stick_off).unwrap();
+        let p = store.for_device(&dev).active();
+        assert_eq!((p.stick.as_ref(), p.stick_off.as_ref()), (Some(&mine), None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tartarus_orientation_like_synapse() {
+        let (sim, pid) = preset("tartarus").unwrap();
+        let dev = sim.open(pid, crate::db::Db::builtin().unwrap().spec(pid)).expect("simulator answers");
+        let dir = std::env::temp_dir().join(format!("secbird-orient-{}", std::process::id()));
+        let mut store = crate::Store::load(&dir.join("profiles.json")).unwrap();
+        assert!(!dev.stick_rotated().unwrap());
+        sim.state().sent.clear();
+        crate::actions::set_stick_rotated(&dev, &mut store, true).unwrap();
+        // As Synapse sent it (log and USB capture): 02:45 [01 01].
+        assert_eq!(sim.state().sent, vec![vec![0x02, 0x02, 0x45, 0x01, 0x01]]);
+        assert!(dev.stick_rotated().unwrap());
+        assert_eq!(store.for_device(&dev).active().stick_rotated, Some(true));
+        sim.state().sent.clear();
+        crate::actions::set_stick_rotated(&dev, &mut store, false).unwrap();
+        assert_eq!(sim.state().sent, vec![vec![0x02, 0x02, 0x45, 0x01, 0x00]]);
+        // A profile switch sends it again, with the profile.
+        sim.state().sent.clear();
+        let p = store.for_device(&dev).clone();
+        p.apply(&p.active, &dev);
+        assert!(sim.state().sent.contains(&vec![0x02, 0x02, 0x45, 0x01, 0x00]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

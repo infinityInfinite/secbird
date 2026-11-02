@@ -113,6 +113,12 @@
   .work { flex: 1; min-height: 0; display: grid; grid-template-columns: 196px minmax(0, 1fr) 384px; }
   .work.wide { grid-template-columns: 196px minmax(0, 1fr); }
   .work.wide .tiles { display: none; }
+  /* A section drawn whole in the middle (the thumbstick): no edit panel beside it. */
+  .work.solo { grid-template-columns: 196px minmax(0, 1fr); }
+  .work.solo .panel { display: none; }
+  .stickmain { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 560px); gap: 20px 36px; align-items: start; }
+  .stickmain > .edbox { min-width: 0; }
+  @media (max-width: 900px) { .stickmain { grid-template-columns: minmax(0, 1fr); } }
   .rail { background: var(--bar); border-right: 1px solid var(--line); overflow-y: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; }
   .sec { display: grid; gap: 1px; text-align: left; background: none; border: 1px solid transparent; border-radius: 9px; padding: 8px 12px; cursor: pointer; color: var(--muted); }
   .sec b { font-weight: 600; color: var(--text); font-size: 14px; }
@@ -211,6 +217,8 @@
   .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
   .switch:checked { background: var(--accent); }
   .switch:checked::after { left: 19px; }
+  .modeside { color: var(--muted); cursor: pointer; user-select: none; }
+  .modeside.on { color: var(--text); font-weight: 600; }
   .dpi { font-size: 30px; font-weight: 650; width: 130px; background: none !important; border: 0 !important; padding: 0 !important; color: var(--value); appearance: textfield; }
   .dpi::-webkit-inner-spin-button, .dpi::-webkit-outer-spin-button { appearance: none; margin: 0; }
   .readout { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; gap: 8px; padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; }
@@ -229,6 +237,26 @@
   .chips5 .pill[aria-pressed=true] { background: var(--fill); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
   #stageRows .dpi { font-size: 17px; width: 84px; }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stickdial { width: 100%; max-width: 260px; aspect-ratio: 1; align-self: center; display: block; }
+  .stickdial .bg { fill: var(--bg); stroke: var(--line-strong); }
+  .stickdial .z1 { fill: var(--raise); stroke: var(--line); }
+  .stickdial .z2 { fill: var(--lit); stroke: var(--line); }
+  .stickdial .on { fill: var(--accent); fill-opacity: .5; }
+  .stickdial .dz { fill: var(--bg); stroke: var(--line-strong); stroke-dasharray: 3 3; }
+  .stickdial text { fill: var(--text); font-size: 13px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+  .stickdial .fwd { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+  .stickdial .own { stroke: var(--faint); stroke-width: 1.5; }
+  .stickdial .pos { stroke: var(--value); stroke-width: 2; }
+  .stickdial .dot { fill: var(--value); }
+  .stickdial.off .z1, .stickdial.off .z2 { fill-opacity: .4; }
+  .sticklive { text-align: center; color: var(--muted); font-size: 12.5px; min-height: 1.45em; }
+  .stickset { display: grid; grid-template-columns: 92px minmax(0, 1fr) 76px; align-items: center; gap: 8px 10px; }
+  .stickset .val { text-align: right; }
+  .stickset input[type=range] { max-width: none; }
+  .stickset input[type=number] { width: 100%; padding: 4px 6px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; text-align: right; }
+  .stickkeys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .stickkeys label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+  .stickkeys input { width: 100%; padding: 6px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; text-align: center; color: var(--text); }
   .pill { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; cursor: pointer; color: var(--muted); }
   .pill:hover { color: var(--text); }
   .pill[aria-pressed=true] { color: var(--text); border-color: var(--accent); }
@@ -348,7 +376,7 @@
   #toast button { background: none; border: 1px solid var(--accent); color: var(--text); border-radius: 999px; padding: 3px 12px; cursor: pointer; font-weight: 600; }
 
   /* Medium windows: a narrower panel. */
-  @media (max-width: 1180px) { .work { grid-template-columns: 172px minmax(0, 1fr) 330px; } .work.wide { grid-template-columns: 172px minmax(0, 1fr); } }
+  @media (max-width: 1180px) { .work { grid-template-columns: 172px minmax(0, 1fr) 330px; } .work.wide, .work.solo { grid-template-columns: 172px minmax(0, 1fr); } }
   /* Small windows and phones: sections become tabs, the panel slides up from the bottom. */
   @media (max-width: 820px) {
     body { overflow: auto; display: block; }
@@ -359,7 +387,7 @@
     .devbar { flex-wrap: wrap; padding: 10px 12px; gap: 10px; }
     .who { max-width: none; flex: 1; }
     #profilesRow { order: 3; flex-basis: 100%; }
-    .work, .work.wide { display: block; }
+    .work, .work.wide, .work.solo { display: block; }
     .rail { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; position: sticky; top: 0; z-index: 3; }
     .sec { flex: none; padding: 6px 12px; }
     .sec span { display: none; }
@@ -873,6 +901,7 @@ function sections() {
   }
   if (dev.macros) s.push({ id: 'macros', name: 'Macros', rows: [{ key: 'macros', label: 'Macros on the device' }] });
   if (dev.game_mode != null) s.push({ id: 'gaming', name: 'Gaming', rows: [{ key: 'gaming', label: 'Gaming mode' }] });
+  if (dev.thumbstick) s.push({ id: 'stick', name: 'Thumbstick', rows: [{ key: 'stick', label: 'Stick mode' }] });
   const power = [];
   if (dev.sleep) power.push({ key: 'sleep', label: 'Sleep when idle' });
   if (dev.dimming) power.push({ key: 'dimming', label: 'Keyboard when idle' });
@@ -904,6 +933,7 @@ function railSummary(s) {
     return n ? plural(n, isBoard() ? 'key' : 'button') + ' changed' : 'As saved in the ' + holder();
   }
   if (s.id === 'gaming') return gamingText(dev.game_mode);
+  if (s.id === 'stick') return stickText(p.stick);
   if (s.id === 'macros') { const m = macroData[dev.id]; return m ? (m.macros.length ? plural(m.macros.length, 'macro') : 'None yet') : 'On the device'; }
   if (s.id === 'power') {
     const sl = dev.sleep;
@@ -935,7 +965,7 @@ function showSection(id) {
   renderWork();
 }
 // A section with one setting opens straight into its editor: one click less.
-const autoOpen = s => (s && !s.loading && s.rows.length === 1 ? s.rows[0].key : null);
+const autoOpen = s => (s && !s.loading && s.id !== 'stick' && s.rows.length === 1 ? s.rows[0].key : null);
 
 // The workbench: rail, tiles of the section, edit panel. `keepPanel` leaves an open editor alone.
 function renderWork(keepPanel) {
@@ -956,6 +986,7 @@ function renderWork(keepPanel) {
   renderTiles(cur);
   $('work').classList.toggle('wide', sel === 'keys');
   $('work').classList.toggle('has-sel', !!sel);
+  $('work').classList.toggle('solo', section === 'stick' && !sel);
   if (!keepPanel || !$('panel').childElementCount) renderPanel(cur);
 }
 
@@ -991,6 +1022,8 @@ function renderTiles(cur) {
     return;
   }
   if (cur.id === 'buttons' && isBoard()) return keyTiles(t, cur);
+  // The keypad has one stick: its settings are the whole section.
+  if (cur.id === 'stick') { const box = el('div', { className: 'stickmain' }); t.append(box); return stickEditor(box); }
   // Side plates (Naga) are drawn as keypads, the way they sit on the mouse.
   const plain = cur.rows.filter(r => !/^btn:(grid|hex)-/.test(r.key));
   const grid = cur.rows.filter(r => /^btn:grid-/.test(r.key));
@@ -1147,6 +1180,7 @@ function select(key) {
 
 function renderPanel(cur) {
   stopFinding();
+  if (section !== 'stick') stopStick();
   const p = $('panel');
   p.innerHTML = '';
   const r = sel && cur.rows.find(x => x.key === sel);
@@ -1275,6 +1309,7 @@ function cellValue(key, name) {
   if (key === 'sleep') { const sl = sleepOf(name); return sl ? sl.auto + ':' + sl.minutes : ''; }
   if (key === 'dimming') return dimmingOf(name) || '';
   if (key === 'gaming') return gamingOf(name) || '';
+  if (key === 'stick') return JSON.stringify(prof(name).stick || null);
   if (key === 'macros' || key === 'onboard') return 'shared'; // the device's, the same in every profile
   if (key.startsWith('btn:')) {
     const b = (btnData[dev.id] || []).find(x => x.name === key.slice(4)); if (!b) return '';
@@ -1344,6 +1379,7 @@ function cellView(key, name) {
     return [m.macros.length ? `${plural(m.macros.length, 'macro')} <small>· every profile</small>` : '<span class="unset">None yet</span>'];
   }
   if (key === 'loading') return ['<span class="unset">…</span>'];
+  if (key === 'stick') { const st = prof(name).stick; return [st ? esc(stickText(st)) : '<span class="unset">Analog mode</span>']; }
   if (key === 'apps') { const a = p.apps || []; return [a.length ? esc(a.join(', ')) : '<span class="unset">No games yet</span>']; }
   if (key === 'device') return [esc(dev.firmware ? 'Firmware ' + dev.firmware : KINDS[dev.kind] || 'Device')];
   if (key.startsWith('btn:')) {
@@ -1408,6 +1444,7 @@ function buildEditor(host, r) {
   else if (r.key === 'sleep') sleepEditor(box);
   else if (r.key === 'dimming') dimmingEditor(box);
   else if (r.key === 'gaming') gamingEditor(box);
+  else if (r.key === 'stick') stickEditor(box);
   else if (r.key === 'onboard') onboardEditor(box);
   else if (r.key === 'macros') macrosEditor(box);
   else if (r.key === 'apps') appsEditor(box);
@@ -1892,6 +1929,179 @@ function gamingEditor(box) {
   box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Keys blocked so a game isn’t left by accident' }), ...rows),
     el('p', { className: 'note', textContent: 'Saved to this profile: tie the profile to a game (Profile → Switches with) and gaming mode comes on while you play.' }),
     el('p', { className: 'note', textContent: 'New and not yet confirmed on a keyboard. If a blocked key still works, please tell us.' }));
+}
+
+// ---------- Thumbstick as keys (Tartarus V2 Pro) ----------
+// Turned on, the keypad goes to 8-way and driver mode and sends the stick's position only to
+// the tray, which presses keys: where forward is (rotation), how far before a key goes down
+// (dead zone) and how wide the zones are where two keys are held (diagonal width).
+const STICK_DIRS = ['Up', 'Right', 'Down', 'Left'];
+const STICK_DEFAULT = { rotation: 0, deadzone: 30, diagonal: 45, keys: ['w', 'd', 's', 'a'] };
+const stickKey = k => !k ? '–' : k.length === 1 ? k.toUpperCase() : k;
+// Keys anticlockwise from up (up, left, down, right: WASD), run together when all single letters.
+function stickKeysText(keys) { const k = [0, 3, 2, 1].map(i => stickKey(keys[i])); return k.join(k.every(x => x.length === 1) ? '' : ' '); }
+function stickText(st) { return st ? 'Key mode · ' + stickKeysText(st.keys) + ' · forward ' + st.rotation + '°' : 'Analog mode'; }
+function diagonalText(d) { return d === 0 ? '4-way' : d === 45 ? 'even 8-way' : d < 45 ? 'narrow' : 'wide'; }
+let stickTimer = null;
+function stopStick() { clearInterval(stickTimer); stickTimer = null; }
+
+function stickEditor(box) {
+  const copy = st => st && { ...st, keys: [...st.keys] };
+  let st = copy(dev.profile.stick), last = copy(st) || copy(dev.profile.stick_off) || copy(STICK_DEFAULT), reading = null, found = true, info = null, failed = null;
+  const shown = () => st || last;
+  const send = live(body => api('/api/stick', body), r => {
+    dev.profile.stick = r.stick; dev.profile.stick_off = r.stick ? undefined : copy(last); refreshCell('stick');
+    return (r.stick ? 'Key mode' : 'Analog mode') + ' · saved to ' + dev.active;
+  });
+  const save = () => { if (st) last = copy(st); send({ on: !!st, stick: st }); draw(); };
+
+  // The dial: zones turned by the rotation, the dead zone, forward and the live stick.
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 240 240'); svg.setAttribute('class', 'stickdial'); svg.setAttribute('role', 'img');
+  const liveLine = el('div', { className: 'sticklive', ariaLive: 'polite' });
+  const sourceLine = el('div', { className: 'sticklive' }); // which controller is read, for reports
+  const C = 120, R = 104;
+  const pt = (a, r) => [C + r * Math.sin(a * Math.PI / 180), C - r * Math.cos(a * Math.PI / 180)].map(v => v.toFixed(1));
+  const wedge = (a0, a1, cls) => {
+    if (a1 - a0 < 0.5) return '';
+    const [x0, y0] = pt(a0, R), [x1, y1] = pt(a1, R);
+    return `<path class="${cls}" d="M${C} ${C}L${x0} ${y0}A${R} ${R} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1} ${y1}Z"/>`;
+  };
+  function draw() {
+    const s = shown(), half = 45 - s.diagonal / 2, held = reading && st ? reading.held : [false, false, false, false];
+    const n = held.filter(Boolean).length;
+    let out = `<circle class="bg" cx="${C}" cy="${C}" r="${R}"/>`;
+    for (let i = 0; i < 4; i++) {
+      const c = s.rotation + 90 * i, j = (i + 1) % 4;
+      out += wedge(c - half, c + half, 'z1' + (n === 1 && held[i] ? ' on' : ''));
+      out += wedge(c + half, c + 90 - half, 'z2' + (n === 2 && held[i] && held[j] ? ' on' : ''));
+    }
+    out += `<circle class="dz" cx="${C}" cy="${C}" r="${(R * s.deadzone / 100).toFixed(1)}"/>`;
+    const lr = R * (1 + s.deadzone / 100) / 2;
+    s.keys.forEach((k, i) => { const [x, y] = pt(s.rotation + 90 * i, lr); out += `<text x="${x}" y="${y}">${esc(stickKey(k))}</text>`; });
+    const [ox, oy] = pt(0, R + 2), [ix, iy] = pt(0, R - 8);
+    out += `<line class="own" x1="${ix}" y1="${iy}" x2="${ox}" y2="${oy}"><title>The stick's own up</title></line>`;
+    const [fx, fy] = pt(s.rotation, R + 4), [gx, gy] = pt(s.rotation, R - 12);
+    out += `<line class="fwd" x1="${gx}" y1="${gy}" x2="${fx}" y2="${fy}"><title>Forward (up key)</title></line>`;
+    if (reading) {
+      const [px, py] = pt(reading.raw, R * reading.push);
+      out += `<line class="pos" x1="${C}" y1="${C}" x2="${px}" y2="${py}"/><circle class="dot" cx="${px}" cy="${py}" r="5"/>`;
+    }
+    svg.innerHTML = out;
+    svg.classList.toggle('off', !st);
+    svg.setAttribute('aria-label', `Thumbstick zones, forward at ${s.rotation} degrees`);
+    const keys = reading && st ? s.keys.filter((k, i) => reading.held[i] && k).map(stickKey).join('+') : '';
+    liveLine.textContent = failed ? 'No live reading from the tray: ' + failed
+      : !found ? 'Stick not seen yet. Move it, or switch between analog and key mode above.'
+      : !reading ? 'Move the stick to see where it points.'
+      : `Pointing at ${Math.round(reading.raw)}° · pushed ${Math.round(reading.push * 100)}%` + (keys ? ' · ' + keys : '');
+    sourceLine.textContent = !info ? '' : info.source ? 'Reading ' + info.source : 'The stick isn’t found yet.';
+    useHere.disabled = !st || !reading || reading.push < 0.5;
+    syncInputs();
+  }
+
+  // On/off.
+  // Analog mode only: Synapse's Thumbstick Orientation, done by the keypad itself.
+  const turnBtns = [[false, 'Default'], [true, 'Rotated 90°']].map(([v, label]) => el('button', { textContent: label, onclick: async () => {
+    if (turned() === v) return;
+    try {
+      const r = await api('/api/stick-rotated', { enabled: v });
+      dev.profile.stick_rotated = r.stick_rotated;
+      toast('Analog orientation: ' + label + ' · saved to ' + dev.active);
+    } catch (err) { toast(err.message, true); }
+    syncTurn();
+  } }));
+  // The analog setting saved with the profile; else the keypad's own (in key mode it is kept unturned).
+  const turned = () => dev.profile.stick_rotated ?? dev.stick_rotated;
+  const syncTurn = () => turnBtns.forEach((b, i) => b.setAttribute('aria-pressed', String(turned() === (i === 1))));
+  syncTurn();
+  const turnGroup = el('div', { className: 'edgroup' }, el('h3', { textContent: 'Analog orientation' }),
+    el('div', { className: 'seg', role: 'group', ariaLabel: 'Analog orientation' }, ...turnBtns),
+    el('p', { className: 'note', textContent: 'Rotated 90° turns the stick a quarter turn clockwise in the keypad itself, as Synapse’s Thumbstick Orientation does, so games see it turned. Saved to this profile. Key mode isn’t affected: there the keypad is kept unturned and Forward does the turning.' }));
+
+  // Analog mode (off) on the left, key mode (on) on the right; either word flips to it.
+  const onoff = el('input', { type: 'checkbox', className: 'switch', id: 'stick-on', checked: !!st, ariaLabel: 'Key mode',
+    onchange: e => { st = e.target.checked ? copy(last) : null; save(); setDisabled(); sides(); } });
+  const pickSide = on => () => { if (onoff.checked !== on) { onoff.checked = on; onoff.dispatchEvent(new Event('change')); } };
+  const analogSide = el('span', { className: 'modeside', textContent: 'Analog mode', title: 'The stick is a game controller', onclick: pickSide(false) });
+  const keySide = el('span', { className: 'modeside', textContent: 'Key mode', title: 'The stick presses the keys below', onclick: pickSide(true) });
+  const sides = () => { analogSide.classList.toggle('on', !onoff.checked); keySide.classList.toggle('on', onoff.checked); turnGroup.hidden = onoff.checked; };
+  sides();
+
+  // A setting row: label, slider, value.
+  const rows = [];
+  function setting(label, prop, min, max, fmt, numberBox) {
+    const range = el('input', { type: 'range', min, max, step: 1, ariaLabel: label });
+    const val = numberBox ? el('input', { type: 'number', min, max, step: 1, ariaLabel: label + ' in degrees', className: 'num' }) : el('span', { className: 'val num' });
+    const set = v => { v = Math.round(+v); if (Number.isNaN(v)) return; if (prop === 'rotation') v = ((v % 360) + 360) % 360; else v = Math.min(max, Math.max(min, v));
+      if (!st || st[prop] === v) return; st[prop] = v; save(); };
+    range.oninput = e => set(e.target.value);
+    if (numberBox) { val.onchange = e => set(e.target.value); val.onkeydown = e => { if (e.key === 'Enter') val.blur(); }; }
+    rows.push({ range, val, sync: () => { const v = shown()[prop]; range.value = v; if (numberBox) { if (document.activeElement !== val) val.value = v; } else val.textContent = fmt(v); } });
+    return [el('span', { textContent: label }), range, val];
+  }
+  const nudge = d => () => { if (!st) return; st.rotation = (st.rotation + d + 360) % 360; save(); };
+  const useHere = el('button', { className: 'ghost', textContent: 'Forward = where the stick points', onclick: () => {
+    if (!st || !reading) return; st.rotation = Math.round(reading.raw) % 360; save();
+  } });
+  const grid = el('div', { className: 'stickset' },
+    ...setting('Forward', 'rotation', 0, 359, v => v + '°', true),
+    ...setting('Dead zone', 'deadzone', 5, 90, v => v + '%'),
+    ...setting('Diagonals', 'diagonal', 0, 80, v => v + '° ' + diagonalText(v)));
+  function syncInputs() { rows.forEach(r => r.sync()); keyInputs.forEach((k, i) => { if (document.activeElement !== k) k.value = shown().keys[i]; }); }
+
+  // Keys.
+  const keyInputs = STICK_DIRS.map((dir, i) => {
+    const input = el('input', { ariaLabel: dir + ' key', spellcheck: false, autocomplete: 'off', onchange: async e => {
+      if (!st) return;
+      const before = st.keys[i];
+      st.keys[i] = e.target.value.trim().toLowerCase();
+      try { const r = await api('/api/stick', { on: true, stick: st }); st = copy(r.stick); last = copy(st); dev.profile.stick = r.stick; refreshCell('stick'); toast(dir + ': ' + (stickKey(st.keys[i])) + ' · saved to ' + dev.active); }
+      catch (err) { st.keys[i] = before; toast(err.message, true); }
+      draw();
+    } });
+    return input;
+  });
+  const keys = el('div', { className: 'stickkeys' }, ...keyInputs.map((k, i) => el('label', {}, STICK_DIRS[i], k)));
+
+  function setDisabled() {
+    rows.forEach(r => { r.range.disabled = !st; r.val.disabled = !st; });
+    keyInputs.forEach(k => { k.disabled = !st; });
+    [...nudges.children].forEach(b => { b.disabled = !st; });
+    draw();
+  }
+  const nudges = el('div', { className: 'row' },
+    el('button', { className: 'ghost', textContent: '−1°', title: 'Forward 1° anticlockwise', onclick: nudge(-1) }),
+    el('button', { className: 'ghost', textContent: '+1°', title: 'Forward 1° clockwise', onclick: nudge(1) }),
+    el('button', { className: 'ghost', textContent: '−90°', onclick: nudge(-90) }),
+    el('button', { className: 'ghost', textContent: '+90°', onclick: nudge(90) }), useHere);
+
+  // Two columns in the main area: the mode and the live dial, then the settings.
+  box.append(
+    el('div', { className: 'edbox' }, el('div', { className: 'row' }, analogSide, onoff, keySide),
+      el('div', { className: 'edgroup' }, svg, liveLine, sourceLine)),
+    el('div', { className: 'edbox' }, turnGroup,
+    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Where forward is, and the zones' }), grid, nudges),
+    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Keys (key names as for remaps: w, space, lshift, up)' }), keys),
+    el('p', { className: 'note', textContent: 'Point the stick the way forward should go and click “Forward = where the stick points”, then fine-tune. Diagonals hold two keys at once (W+A): 0° is a clean 4-way, 45° an even 8-way.' }),
+    el('p', { className: 'note', textContent: 'Key mode: Secretarybird puts the keypad in 8-way mode and Razer’s driver mode, so games get only these keys from the stick, no controller. Analog mode: the stick is a game controller again, and the keypad goes back to normal mode. Synapse doesn’t need to run.' }),
+    el('p', { className: 'note', textContent: 'In key mode the keys are pressed while Secretarybird runs, and let go while the PC is locked. These settings are kept in analog mode for next time. Saved to this profile, so a profile tied to a game can have its own settings.' })));
+  setDisabled();
+
+  // The dial follows the stick 60 times a second; a tick is skipped while the last ask is out.
+  let asking = false;
+  const poll = async () => {
+    if (!box.isConnected) return stopStick();
+    if (asking) return;
+    asking = true;
+    try { const r = await api('/api/stick-live'); info = r; found = r.found; reading = r.reading || null; failed = null; }
+    catch (e) { failed = e.message; }
+    finally { asking = false; }
+    draw();
+  };
+  stopStick();
+  stickTimer = setInterval(poll, 1000 / 60);
+  poll();
 }
 
 // Asks Razer's public product page whether newer firmware is out. Never installs anything.
