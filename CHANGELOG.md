@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Tartarus V2 Pro thumbstick (#21): Analog mode / Key mode on the Thumbstick tab. Key mode turns
+  the stick into keys (WASD out of the box) and games get only those keys, no controller: the
+  keypad goes into 8-way mode and driver mode, as Synapse does, and sends the stick's position in
+  its own report. Unlike Synapse's 4-way and 8-way modes, forward can be at any angle, the zones
+  where two keys are held at once (W+A) have an adjustable width, from a clean 4-way to wide
+  diagonals, and the dead zone is set apart from the angle. A key stays down a few degrees past
+  its zone so it doesn't flicker, and keys are let go while the PC is locked. Analog mode makes
+  the stick a game controller again, with Synapse's Thumbstick Orientation (the keypad's own
+  quarter turn) if wanted; key mode isn't affected by it. Settings are kept per profile, also
+  while in analog mode. The tab shows the stick live on a dial, with "Forward = where the stick
+  points". Also `secbird stick`, `secbird stickturn`, `secbird stickmode` and `secbird devmode`.
+- Tartarus V2 Pro keys (#21): the Keys tab draws the keypad as it is (rows of 6, 6, 6, 5 and 4,
+  numbered as printed, and the three thumb buttons and the stick press beside them), and
+  remapping works. The keypad keeps remaps in its own memory, so Secretarybird writes them as
+  Synapse does (keymap 1 of profile 1), byte for byte as seen in USB captures, and they work with
+  nothing running. In key mode the keypad ignores its own keymap (driver mode); the tray then does
+  the remaps itself, telling the keypad's keys from another keyboard's by the keypad's own report.
+  For now a key can be set to another single key on the normal layer; the top and bottom thumb
+  buttons can also go back to HyperShift and cycle up profile. HyperShift-layer remaps, shortcuts
+  and macros come later.
+- `secbird listen [keys]`: a read-only recording of what a device sends, to work out what its
+  interfaces carry.
+
+Tested on one keypad (firmware 1.2) without Synapse running. The commands, and the captures and
+logs they come from, are in docs/tartarus-v2-pro.md.
+
 ## [0.5.1] - 2026-10-30
 
 ### Added
