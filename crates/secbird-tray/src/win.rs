@@ -243,6 +243,7 @@ pub fn run() {
         };
 
         crate::stick::start(engine.stick().clone());
+        crate::keymap::start();
 
         let hinstance = GetModuleHandleW(null());
         let class = wide(CLASS_NAME);
@@ -614,6 +615,15 @@ impl App {
                 // kind 1 = on-board profile.
                 while let Ok(n) = device.read(&mut buf) {
                     if let Some(stick) = &stick {
+                        // In driver mode the same report lists the keys the keypad has down.
+                        if let Some(keys) = secbird_core::keymap::report_keys(&buf[..n]) {
+                            crate::keymap::shared().report(&keys);
+                        }
+                        // Its thumb buttons and stick press, which type nothing in driver mode.
+                        if let Some(keys) = secbird_core::keymap::report_razer_keys(&buf[..n]) {
+                            crate::keymap::shared().razer_keys(&keys);
+                            continue;
+                        }
                         if let Some(pos) = secbird_core::stick::raw_report(&buf[..n]) {
                             stick.set_raw(pos);
                             continue;

@@ -117,6 +117,8 @@ pub struct SimState {
     /// Every well-formed SET received, as `[size, class, id, arguments...]` with the
     /// arguments cut to the size: the bytes after the transaction id and the zeros.
     pub sent: Vec<Vec<u8>>,
+    /// Keymap chosen with "Set OBM Keymap" (02:37), on a keypad that keeps remaps on board.
+    pub obm_keymap: Option<u8>,
     /// Device mode (00:04) and stick report and mapping modes (02:38, 02:39), on a keypad
     /// with a stick: `[mode, param]`, `[report]`, `[profile, mapping]`.
     pub stick_modes: Option<([u8; 2], u8, u8)>,
@@ -162,6 +164,7 @@ impl SimState {
             busy_reads: 0,
             log: Vec::new(),
             sent: Vec::new(),
+            obm_keymap: None,
             stick_modes: None,
             stick_orientation: 0,
             reply: None,
@@ -352,6 +355,10 @@ impl SimState {
                 ok(a[..2].to_vec())
             }
             c if c == Command::new(0x02, 0xC5) && self.stick_modes.is_some() => ok(vec![a[0], self.stick_orientation]),
+            cmd::OBM_KEYMAP if self.obm_keymap.is_some() => {
+                self.obm_keymap = Some(a[0]);
+                ok(vec![a[0]])
+            }
             cmd::KEY => {
                 if !self.keys.contains_key(&(1, a[1], a[2])) {
                     return (if self.keys.is_empty() { NotSupported } else { Failed }, vec![]);
@@ -909,6 +916,13 @@ pub fn preset(name: &str) -> Option<(Sim, u16)> {
             s.polling_hs = Some(0x08);
             s.leds = vec![5];
             s.macros = Some(BTreeMap::new());
+            with_keys(&mut s);
+            // Thumb inputs as the keypad comes: HyperShift, cycle down keymap (a Razer key
+            // function not modelled here), cycle up profile, disabled.
+            for (id, function, d0) in [(59, 0x0C, 1), (218, 0x0D, 0), (217, 7, 4), (219, 0, 0)] {
+                s.keys.insert((1, id, 0), (function, [d0, 0, 0, 0, 0]));
+            }
+            s.obm_keymap = Some(1);
             s.stick_modes = Some(([0, 0], 0, 0));
             (Sim::new(s), 0x02EB)
         }
@@ -1527,6 +1541,45 @@ mod tests {
     }
 
     #[test]
+    fn tartarus_thumb_inputs_are_written_like_synapse() {
+        use crate::buttons::{parse_setting_key, Action, Layer};
+        let (sim, pid) = preset("tartarus").unwrap();
+        let dev = sim.open(pid, crate::db::Db::builtin().unwrap().spec(pid)).expect("simulator answers");
+        let listed: Vec<String> = dev.keys().iter().map(|k| crate::buttons::Input::Key(k.0).name()).collect();
+        for name in ["key-thumb-top", "key-thumb-middle", "key-thumb-bottom", "key-stick-press"] {
+            assert!(listed.iter().any(|n| n == name), "{name} listed");
+        }
+        let input = |name: &str| parse_setting_key(name).unwrap().0;
+        let two = Action::Key { modifiers: 0, usage: 0x1F };
+        // From a USB capture of Synapse 4: the stick press to 2, then the thumb buttons back.
+        let cases: [(&str, Option<Action>, &[u8]); 3] = [
+            ("key-stick-press", Some(two), &[0x01, 0xDB, 0x00, 0x02, 0x02, 0x00, 0x1F, 0, 0, 0]),
+            ("key-thumb-top", None, &[0x01, 0x3B, 0x00, 0x0C, 0x01, 0x01, 0, 0, 0, 0]),
+            ("key-thumb-bottom", None, &[0x01, 0xD9, 0x00, 0x07, 0x01, 0x04, 0, 0, 0, 0]),
+        ];
+        for (name, action, args) in cases {
+            if name != "key-stick-press" {
+                dev.set_input(input(name), Layer::Normal, two).unwrap(); // something to put back
+            }
+            sim.state().sent.clear();
+            match action {
+                Some(a) => assert!(dev.set_input(input(name), Layer::Normal, a).unwrap()),
+                None => assert!(dev.reset_input(input(name), Layer::Normal).unwrap()),
+            }
+            let want = [&[0x0A, 0x02, 0x0D][..], args].concat();
+            assert_eq!(sim.state().sent, vec![vec![0x01, 0x02, 0x37, 0x01], want], "{name}");
+        }
+        // Not seen from Synapse: the middle button's and the stick press's defaults, and a
+        // thumb button's function on another key.
+        sim.state().sent.clear();
+        assert!(matches!(dev.reset_input(input("key-thumb-middle"), Layer::Normal), Err(Error::Unsupported(_))));
+        assert!(matches!(dev.reset_input(input("key-stick-press"), Layer::Normal), Err(Error::Unsupported(_))));
+        assert!(matches!(dev.set_input(input("key-s"), Layer::Normal, Action::HyperShift), Err(Error::Unsupported(_))));
+        assert!(matches!(dev.set_input(input("key-thumb-middle"), Layer::Normal, Action::HyperShift), Err(Error::Unsupported(_))));
+        assert!(sim.state().sent.is_empty());
+    }
+
+    #[test]
     fn tartarus_orientation_like_synapse() {
         let (sim, pid) = preset("tartarus").unwrap();
         let dev = sim.open(pid, crate::db::Db::builtin().unwrap().spec(pid)).expect("simulator answers");
@@ -1548,6 +1601,48 @@ mod tests {
         p.apply(&p.active, &dev);
         assert!(sim.state().sent.contains(&vec![0x02, 0x02, 0x45, 0x01, 0x00]));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tartarus_keys_are_written_like_synapse() {
+        use crate::buttons::{Action, Input, Layer};
+        let (sim, pid) = preset("tartarus").unwrap();
+        let spec = crate::db::Db::builtin().unwrap().spec(pid);
+        assert!(spec.as_ref().is_some_and(|s| s.onboard_keymap), "devices.json marks it");
+        let dev = sim.open(pid, spec).expect("simulator answers");
+        let s_key = Input::Key(32);
+        let two = Action::Key { modifiers: 0, usage: 0x1F };
+        assert_eq!(dev.input(s_key, Layer::Normal).unwrap(), Action::Key { modifiers: 0, usage: 0x16 });
+        sim.state().sent.clear();
+        assert!(dev.set_input(s_key, Layer::Normal, two).unwrap());
+        // From a USB capture of Synapse 4 setting key 15 (S) to 2 on this keypad.
+        assert_eq!(
+            sim.state().sent,
+            vec![vec![0x01, 0x02, 0x37, 0x01], vec![0x0A, 0x02, 0x0D, 0x01, 0x20, 0x00, 0x02, 0x02, 0x00, 0x1F, 0x00, 0x00, 0x00]],
+            "02:37 then 02:0D, byte for byte"
+        );
+        assert_eq!(sim.state().keys[&(1, 32, 0)].1[1], 0x1F, "profile 1, not the live slot");
+        assert_eq!(sim.state().keys[&(0, 32, 0)].1[1], 0x16, "live slot untouched");
+        assert_eq!(dev.input(s_key, Layer::Normal).unwrap(), two);
+
+        // Back to default writes S, as Synapse's revert did; unchanged keys send nothing.
+        sim.state().sent.clear();
+        assert!(dev.reset_input(s_key, Layer::Normal).unwrap());
+        assert_eq!(sim.state().sent[1], vec![0x0A, 0x02, 0x0D, 0x01, 0x20, 0x00, 0x02, 0x02, 0x00, 0x16, 0x00, 0x00, 0x00]);
+        sim.state().sent.clear();
+        assert!(!dev.set_input(s_key, Layer::Normal, Action::Key { modifiers: 0, usage: 0x16 }).unwrap());
+        assert!(sim.state().sent.is_empty());
+
+        // Nothing Synapse wasn't seen sending: no HyperShift, no shortcuts, no saving to a slot.
+        for (layer, action) in [
+            (Layer::HyperShift, two),
+            (Layer::Normal, Action::Key { modifiers: 0x01, usage: 0x06 }),
+            (Layer::Normal, "disabled".parse().unwrap()),
+        ] {
+            assert!(matches!(dev.set_input(s_key, layer, action), Err(Error::Unsupported(_))), "{action} on {layer:?}");
+        }
+        assert!(dev.set_slot_input(1, s_key, Layer::Normal, two).is_err());
+        assert!(sim.state().sent.is_empty(), "refused before sending");
     }
 
     #[test]

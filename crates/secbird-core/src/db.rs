@@ -110,6 +110,11 @@ pub struct DeviceSpec {
     /// tray can turn into keys (see [`crate::stick`]).
     #[serde(default)]
     pub thumbstick: bool,
+    /// Keeps key remaps in an on-board profile's keymap instead of a live slot, the way
+    /// Synapse remaps the Tartarus V2 Pro: select keymap 1 (02:37), then set the key in
+    /// profile 1 (02:0D, size 0A). See [`crate::buttons`] and docs/tartarus-v2-pro.md.
+    #[serde(default)]
+    pub onboard_keymap: bool,
     /// Where this entry's facts come from (e.g. "synapse-descriptor", "openrazer").
     #[serde(default)]
     pub source: String,

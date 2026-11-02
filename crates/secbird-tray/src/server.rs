@@ -443,6 +443,7 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
             "/api/buttons" => Ok(buttons_json(dev, &mut store)),
             "/api/buttons-restore" => {
                 actions::restore_all_buttons(dev, &mut store)?;
+                engine.refresh_stick();
                 Ok(buttons_json(dev, &mut store))
             }
             "/api/save-to-mouse" => {
@@ -503,6 +504,7 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                     text => Some(text.parse()?),
                 };
                 actions::set_button(dev, &mut store, &b.button, layer, action)?;
+                engine.refresh_stick(); // remaps done on the PC follow
                 Ok(buttons_json(dev, &mut store))
             }
             "/api/stick-rotated" => {

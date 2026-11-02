@@ -113,15 +113,24 @@ impl Engine {
     pub fn refresh_stick(&self) {
         let keypads: Vec<&Device> =
             self.devices.iter().filter(|d| d.spec.as_ref().is_some_and(|s| s.thumbstick)).collect();
-        let stick = match (keypads.first(), Self::store()) {
+        let (stick, remaps) = match (keypads.first(), Self::store()) {
             (Some(dev), Ok(mut store)) => {
                 let p = store.for_device(dev);
                 let name = p.effective(self.foreground()).to_string();
-                p.profiles.get(&name).and_then(|p| p.stick.clone())
+                let profile = p.profiles.get(&name);
+                let stick = profile.and_then(|p| p.stick.clone());
+                // With the stick as keys the keypad is in driver mode, where it ignores its own
+                // keymap: the remaps are done here instead (see crate::keymap).
+                let remaps = match (&stick, profile) {
+                    (Some(_), Some(p)) => secbird_core::keymap::Remaps::from_buttons(&p.buttons),
+                    _ => secbird_core::keymap::Remaps::default(),
+                };
+                (stick, remaps)
             }
-            _ => None,
+            _ => (None, secbird_core::keymap::Remaps::default()),
         };
         self.stick.set(stick, keypads.iter().map(|d| d.pid).collect());
+        crate::keymap::shared().set(remaps);
     }
 
     pub fn foreground(&self) -> Option<&str> {

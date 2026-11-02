@@ -293,6 +293,11 @@
   #remapkb g.changed rect { fill: var(--lit); stroke: var(--accent); }
   #remapkb g[aria-pressed=true] rect, #remapkb g[data-row]:focus-visible rect { stroke: var(--lit-edge); stroke-width: .07; }
   #remapkb g.none { opacity: .4; }
+  /* A keypad: keys are labelled with the number printed on them, and always show what they do. */
+  #remapkb.pad { min-width: 0; max-width: 700px; }
+  #remapkb.pad text.num { fill: var(--muted); font-size: .2px; }
+  #remapkb.pad text.act { fill: var(--value); font-size: .2px; }
+  #remapkb.pad g.changed text.act { fill: var(--accent-text); }
   .lightgrid { display: grid; gap: 3px; min-width: 600px; max-width: 1040px; }
   .lightgrid button { aspect-ratio: 1; min-width: 0; padding: 0; border: 1px solid var(--key-stroke); border-radius: 4px; background: var(--key-fill);
     color: var(--key-text); font-size: 10px; line-height: 1.1; overflow: hidden; cursor: pointer; overflow-wrap: anywhere; }
@@ -998,7 +1003,7 @@ function renderTiles(cur) {
   if (cur.tools === 'layer') {
     if (Object.keys(dev.profile.buttons || {}).length) tools.append(el('button', { className: 'ghost', textContent: 'Restore all',
       title: `Every changed ${isBoard() ? 'key' : 'button'} back to what the ${holder()} stores`, onclick: restoreAllButtons }));
-    if (isBoard() && remapLayout()) {
+    if (isBoard() && remapLayout() && dev.kind !== 'keypad') {
       const pick = el('select', { ariaLabel: 'Keyboard layout', onchange: () => { remember('kblayout-' + dev.id, pick.value); renderWork(true); } });
       KB_LAYOUTS.forEach(([v, txt]) => pick.append(new Option(txt, v, false, v === kbLayout())));
       tools.append(pick);
@@ -1055,7 +1060,7 @@ const holder = () => dev.kind === 'mouse' ? 'mouse' : (KINDS[dev.kind] || 'devic
 // The size comes from the light grid: 5 rows is 60% (15 columns) or 65%, 6 rows of 16 or 17
 // columns is 75%. With no grid, a numpad key in the key list means full size.
 function remapLayout() {
-  if (dev.kind === 'keypad') return null;
+  if (dev.kind === 'keypad') return KEYPAD_LAYOUTS[dev.pid] || null;
   const m = dev.matrix;
   if (m && knownLayout(m, dev.kind)) return layout(m, dev.kind);
   const cols = m && m.cols - ((m.first ?? 1) - 1);
@@ -1064,6 +1069,22 @@ function remapLayout() {
   const numpad = m ? cols >= 20 : (btnData[dev.id] || []).some(b => b.name === 'key-num5');
   return layout(numpad ? { rows: 6, cols: 22 } : { rows: 6, cols: 18 }, 'keyboard');
 }
+// Keypads, drawn as they are: [number printed on the key, key name, x, y, width, title] in
+// key units. Tartarus V2 Pro (02EB) from Synapse's own drawing of it: the left column is
+// wider, 23 and 27 span two columns, and the thumb inputs sit in a column of their own on
+// the right: the stick press, then the three thumb buttons top to bottom.
+const KEYPAD_LAYOUTS = {
+  '02EB': [
+    ...['grave', '1', '2', '3', '4', '5'].map((name, i) => [i + 1, name, i ? i + 0.5 : 0, 0, i ? 1 : 1.5]),
+    ...['tab', 'q', 'w', 'e', 'r', 't'].map((name, i) => [i + 7, name, i ? i + 0.5 : 0, 1, i ? 1 : 1.5]),
+    ...['capslock', 'a', 's', 'd', 'f', 'g'].map((name, i) => [i + 13, name, i ? i + 0.5 : 0, 2, i ? 1 : 1.5]),
+    [19, 'lshift', 0, 3, 1.5], [20, 'z', 1.5, 3, 1], [21, 'x', 2.5, 3, 1], [22, 'c', 3.5, 3, 1], [23, 'v', 4.5, 3, 2],
+    [24, 'lctrl', 0, 4, 1.5], [25, 'b', 1.5, 4, 1], [26, 'i', 2.5, 4, 1], [27, 'space', 3.5, 4, 2],
+    ['Stick', 'stick-press', 7, 0, 1.6, 'Stick press'], ['Top', 'thumb-top', 7, 1, 1.6, 'Top thumb button (HyperShift)'],
+    ['Mid', 'thumb-middle', 7, 2, 1.6, 'Middle thumb button'], ['Low', 'thumb-bottom', 7, 3, 1.6, 'Bottom thumb button'],
+  ].map(([num, name, x, y, w, title]) => ({ label: String(num), name, num, x, y, w, h: 1, title: title || 'Key ' + num })),
+};
+
 // 75% (fRow) and 65% boards: the full-size main block, a column of navigation keys, and the
 // arrows tucked in at the bottom right. Drawn for remapping only; the columns aren't lights.
 function compactBoard(fRow) {
@@ -1100,8 +1121,10 @@ function keyTiles(t, cur) {
   if (keys) {
     const w = Math.max(...keys.map(k => k.x + k.w)), h = Math.max(...keys.map(k => k.y + k.h));
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const pad = dev.kind === 'keypad';
     svg.id = 'remapkb'; svg.setAttribute('viewBox', `-0.05 -0.05 ${w + 0.1} ${h + 0.1}`);
-    svg.setAttribute('aria-label', 'Keyboard: pick a key to change what it does');
+    if (pad) svg.setAttribute('class', 'pad');
+    svg.setAttribute('aria-label', (pad ? 'Keypad' : 'Keyboard') + ': pick a key to change what it does');
     svg.innerHTML = keys.map(k => {
       const r = k.name && rows.get('btn:key-' + k.name);
       const box = `<rect x="${k.x + .05}" y="${k.y + .05}" width="${k.w - .1}" height="${k.h - .1}" rx=".12"/>`;
@@ -1109,7 +1132,13 @@ function keyTiles(t, cur) {
       drawn.add(r.key);
       const [html, changed] = cellView(r.key, dev.active);
       const what = el('span', { innerHTML: html }).textContent.replace(/^Key /, '');
-      const short = what.length > 8 ? what.slice(0, 7) + '…' : what;
+      const room = Math.round(k.w * 7);
+      const short = what.length > room + 1 ? what.slice(0, room) + '…' : what;
+      // Keypad keys show their printed number and what they type, changed or not.
+      if (pad) return `<g data-row="${esc(r.key)}" class="${changed ? 'changed' : ''}" tabindex="0" role="button" aria-pressed="${sel === r.key}"` +
+        ` aria-label="${esc(k.title + ': ' + what + (changed ? ' (changed)' : ''))}"><title>${esc(k.title + ': ' + what)}</title>${box}` +
+        `<text class="num" x="${k.x + .14}" y="${k.y + .24}" style="text-anchor:start">${esc(k.label)}</text>` +
+        `<text class="act" x="${k.x + k.w / 2}" y="${k.y + k.h * .58}">${esc(short)}</text></g>`;
       return `<g data-row="${esc(r.key)}" class="${changed ? 'changed' : ''}" tabindex="0" role="button" aria-pressed="${sel === r.key}"` +
         ` aria-label="${esc(r.label + ': ' + what + (changed ? ' (changed)' : ''))}"><title>${esc(r.label + ': ' + what)}</title>${box}` +
         (changed ? `<text x="${k.x + k.w / 2}" y="${k.y + k.h * .34}">${esc(k.label)}</text><text class="act" x="${k.x + k.w / 2}" y="${k.y + k.h * .7}">${esc(short)}</text>`
@@ -1119,7 +1148,7 @@ function keyTiles(t, cur) {
     svg.onclick = pick;
     svg.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(e); } };
     t.append(el('div', { className: 'kbwrap' }, svg));
-    if (!(dev.matrix && knownLayout(dev.matrix, dev.kind))) t.append(el('p', { className: 'hint', textContent:
+    if (!pad && !(dev.matrix && knownLayout(dev.matrix, dev.kind))) t.append(el('p', { className: 'hint', textContent:
       'Drawn as a standard keyboard: yours may not have every key shown. Greyed keys can’t be changed.' }));
   }
   const rest = cur.rows.filter(r => !drawn.has(r.key));
@@ -2310,6 +2339,10 @@ function buttonEditor(box, name) {
     el('div', { className: 'row' }, sel, keyIn, modBox, macroSel, playSel, numIn, numLabel)));
   if (b.remapped[btnLayer]) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Stored on the ' + holder() }),
     el('div', { className: 'row' }, el('span', { textContent: actionLabel(saved) || 'Unknown' }), el('button', { className: 'ghost', textContent: 'Restore', title: 'Put back what the ' + holder() + ' stores', onclick: () => assign(b.name, '') }))));
+  // Tartarus V2 Pro: in driver mode (stick in key mode) the firmware treats this button as
+  // HyperShift whatever it's set to, and shows its HyperShift light cue (Synapse too, #21).
+  if (dev.pid === '02EB' && b.name === 'key-thumb-top') box.append(el('p', { className: 'note', textContent:
+    'In key mode (Thumbstick tab) the keypad’s lights flash when you press this button. The keypad treats it as HyperShift in that mode, whatever it is set to, and shows its HyperShift light cue; Synapse does the same. It still does what you set here, and the other keys work as usual while it is held. In analog mode it doesn’t flash.' }));
 }
 
 async function loadMacros(d) {

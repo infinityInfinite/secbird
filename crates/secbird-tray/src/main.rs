@@ -8,6 +8,8 @@ mod apps;
 #[cfg(windows)]
 mod engine;
 #[cfg(windows)]
+mod keymap;
+#[cfg(windows)]
 mod osd;
 #[cfg(windows)]
 mod server;
