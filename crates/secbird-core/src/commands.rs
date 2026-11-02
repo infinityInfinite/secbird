@@ -160,6 +160,18 @@ pub const BUTTON_IDS_SIZE: u8 = 0x50;
 /// in software, so no keyboard has been seen to take it yet.
 pub const KEY: Command = Command::new(0x02, 0x0D);
 pub const KEY_SIZE: u8 = 0x50;
+/// On keypads that keep remaps on board (Tartarus V2 Pro), Synapse writes a key with size
+/// 0A, `[profile, key, layer, function, size, data0..data4]`, into the keymap chosen with
+/// [`OBM_KEYMAP`]. Seen in a USB capture of Synapse remapping S to 2:
+/// `02:37 [01]` then `02:0D [01 20 00 02 02 00 1F 00 00 00]`.
+pub const KEYMAP_KEY_SIZE: u8 = 0x0A;
+/// Synapse "Set OBM Keymap": `[keymap]`, the keymap later key writes go to. Synapse sends it
+/// before every key write.
+pub const OBM_KEYMAP: Command = Command::new(0x02, 0x37);
+pub const OBM_KEYMAP_SIZE: u8 = 0x01;
+/// The on-board profile and keymap Synapse writes remaps to: profile 1, keymap 1.
+pub const KEYMAP_PROFILE: u8 = 1;
+pub const KEYMAP_ID: u8 = 1;
 /// The key ids a keyboard has (Synapse "Get Key Assignment List"): request `[slot, layer,
 /// offset]`, reply `[slot, layer, ids...]`. GET only; what the request bytes mean is a guess.
 pub const KEY_IDS: Command = Command::new(0x02, 0x8F);

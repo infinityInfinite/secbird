@@ -242,6 +242,9 @@ pub fn run() {
             }
         };
 
+        crate::stick::start(engine.stick().clone());
+        crate::keymap::start();
+
         let hinstance = GetModuleHandleW(null());
         let class = wide(CLASS_NAME);
         let wc = WNDCLASSW {
@@ -569,6 +572,8 @@ impl App {
     /// and come back after.
     fn set_away(&mut self, locked: bool, screen_off: bool) {
         (self.locked, self.screen_off) = (locked, screen_off);
+        // No keys held from the thumbstick while nobody is at the PC.
+        self.engine().stick().set_paused(locked || screen_off);
         let percent = TraySettings::load().away_percent().filter(|_| locked || screen_off);
         let mut engine = self.engine();
         match percent {
@@ -598,11 +603,32 @@ impl App {
                 continue;
             };
             let (tx, listening, hwnd) = (self.events_tx.clone(), self.listening.clone(), self.hwnd as usize);
+            // A keypad with a stick sends the stick's position here too, in 4-way/8-way mode.
+            // One lock: a second self.engine() in the same statement would wait on the first.
+            let stick = {
+                let engine = self.engine();
+                engine.has_thumbstick(&key).then(|| engine.stick().clone())
+            };
             let spawned = std::thread::Builder::new().stack_size(LISTENER_STACK).spawn(move || {
-                let mut buf = [0u8; 16];
+                let mut buf = [0u8; 64];
                 // Notification events: [0x05, kind, ...]; kind 2 = DPI (x, y big-endian),
                 // kind 1 = on-board profile.
                 while let Ok(n) = device.read(&mut buf) {
+                    if let Some(stick) = &stick {
+                        // In driver mode the same report lists the keys the keypad has down.
+                        if let Some(keys) = secbird_core::keymap::report_keys(&buf[..n]) {
+                            crate::keymap::shared().report(&keys);
+                        }
+                        // Its thumb buttons and stick press, which type nothing in driver mode.
+                        if let Some(keys) = secbird_core::keymap::report_razer_keys(&buf[..n]) {
+                            crate::keymap::shared().razer_keys(&keys);
+                            continue;
+                        }
+                        if let Some(pos) = secbird_core::stick::raw_report(&buf[..n]) {
+                            stick.set_raw(pos);
+                            continue;
+                        }
+                    }
                     let event = match (n, buf[0], buf[1]) {
                         (6.., 0x05, 0x02) => DeviceEvent::Dpi {
                             key: key.clone(),

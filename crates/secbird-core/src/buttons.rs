@@ -200,9 +200,36 @@ pub const KEYS: &[(u8, &str, &str, u8)] = &[
 /// (the mouse button) stay apart.
 const KEY_PREFIX: &str = "key-";
 
+/// The Tartarus V2 Pro's thumb inputs: (key id, name, label, Razer key). The key id is what
+/// 02:0D takes (seen in USB captures of Synapse setting each one to a key, #21); the Razer
+/// key is what the keypad reports in report 04 in driver mode, where they type nothing.
+/// Top to bottom as on Synapse's drawing, then the stick press.
+pub const KEYPAD_THUMBS: &[(u8, &str, &str, u8)] = &[
+    (59, "thumb-top", "Top thumb button (HyperShift)", 0x01),
+    (218, "thumb-middle", "Middle thumb button", 0x67),
+    (217, "thumb-bottom", "Bottom thumb button", 0x68),
+    (219, "stick-press", "Stick press", 0x69),
+];
+
+/// What a key of a keypad that keeps remaps on board does out of the box, where Synapse was
+/// seen writing it: the key's own usage, or for two thumb buttons their default function
+/// (`0C 01 01` HyperShift, `07 01 04` cycle up profile, from a USB capture). The middle thumb
+/// button (cycle down keymap) and the stick press (disabled) had nothing written, so `None`.
+pub fn onboard_default(id: u8) -> Option<Action> {
+    match id {
+        59 => Some(Action::HyperShift),
+        217 => Some(Action::ProfileCycleUp),
+        _ => KEYS.iter().find(|k| k.0 == id).map(|k| Action::Key { modifiers: 0, usage: k.3 }),
+    }
+}
+
 /// A key's id from its name without the `key-` prefix (`capslock`, or `id57`).
 pub fn key_id(name: &str) -> Option<u8> {
-    KEYS.iter().find(|k| k.1 == name).map(|k| k.0).or_else(|| name.strip_prefix("id")?.parse().ok())
+    KEYS.iter()
+        .find(|k| k.1 == name)
+        .map(|k| k.0)
+        .or_else(|| KEYPAD_THUMBS.iter().find(|k| k.1 == name).map(|k| k.0))
+        .or_else(|| name.strip_prefix("id")?.parse().ok())
 }
 
 /// A remappable input: a mouse button or a keyboard key. Each has its own id space.
@@ -225,7 +252,11 @@ impl Input {
         match self {
             Input::Button(id) => button_name(id),
             Input::Key(id) => {
-                let name = KEYS.iter().find(|k| k.0 == id).map_or_else(|| format!("id{id}"), |k| k.1.to_string());
+                let name = KEYS
+                    .iter()
+                    .chain(KEYPAD_THUMBS)
+                    .find(|k| k.0 == id)
+                    .map_or_else(|| format!("id{id}"), |k| k.1.to_string());
                 format!("{KEY_PREFIX}{name}")
             }
         }
@@ -234,7 +265,9 @@ impl Input {
     pub fn label(self) -> String {
         match self {
             Input::Button(id) => button_label(id),
-            Input::Key(id) => KEYS.iter().find(|k| k.0 == id).map_or_else(|| format!("Key {id}"), |k| k.2.to_string()),
+            Input::Key(id) => {
+                KEYS.iter().chain(KEYPAD_THUMBS).find(|k| k.0 == id).map_or_else(|| format!("Key {id}"), |k| k.2.to_string())
+            }
         }
     }
 
@@ -734,22 +767,73 @@ impl Device {
         Ok(Action::decode(a[3], [a[5], a[6], a[7], a[8], a[9]]))
     }
 
-    /// What a button or key does right now (the live slot).
+    /// Whether this key lives in an on-board keymap (Tartarus V2 Pro) rather than a live slot.
+    fn in_onboard_keymap(&self, input: Input) -> bool {
+        matches!(input, Input::Key(_)) && self.spec.as_ref().is_some_and(|s| s.onboard_keymap)
+    }
+
+    /// What a button or key does right now (the live slot, or profile 1 of a keypad that
+    /// keeps remaps on board).
     pub fn input(&self, input: Input, layer: Layer) -> Result<Action> {
-        self.read_input(cmd::BUTTON_LIVE_SLOT, input, layer)
+        let slot = if self.in_onboard_keymap(input) { cmd::KEYMAP_PROFILE } else { cmd::BUTTON_LIVE_SLOT };
+        self.read_input(slot, input, layer)
     }
 
     /// What a button or key does in the active saved slot: Synapse's or the factory setting.
+    /// A keypad that keeps remaps on board has no separate saved copy: its keys go back to
+    /// what they type out of the box, as Synapse's "default" does.
     pub fn saved_input(&self, input: Input, layer: Layer) -> Result<Action> {
+        if self.in_onboard_keymap(input) {
+            let Input::Key(id) = input else { unreachable!() };
+            if layer != Layer::Normal {
+                return Err(Error::Unsupported(format!("{} has no known default here", input.label())));
+            }
+            return onboard_default(id).ok_or_else(|| {
+                Error::Unsupported(format!(
+                    "{} can't be put back to its default from here yet (Synapse wasn't seen doing it); set it to a key, or use Synapse",
+                    input.label()
+                ))
+            });
+        }
         let slot = self.get(cmd::ACTIVE_SLOT, 1, &[]).map(|r| r.args()[0]).unwrap_or(1).max(1);
         self.read_input(slot, input, layer)
     }
 
-    /// Set a button or key in the live slot. Returns whether anything was sent: an
-    /// unchanged one is left alone.
+    /// Set a key the way Synapse does on a keypad that keeps remaps on board, byte for byte as
+    /// captured: `02:37 [01]`, then `02:0D` size 0A `[01, key, 00, 02, 02, 00, usage, 0, 0, 0]`.
+    /// Only what Synapse was seen sending: a single key on the normal layer.
+    fn set_onboard_key(&self, id: u8, layer: Layer, action: Action) -> Result<()> {
+        let known = KEYS.iter().chain(KEYPAD_THUMBS).any(|k| k.0 == id);
+        let allowed = match action {
+            Action::Key { modifiers: 0, .. } => known,
+            // The thumb buttons' defaults, as Synapse wrote them back.
+            other => onboard_default(id) == Some(other),
+        };
+        if !allowed {
+            return Err(Error::Unsupported(
+                "on this keypad a key can only be set to another single key for now (no shortcuts, macros or mouse actions)".into(),
+            ));
+        }
+        if layer != Layer::Normal {
+            return Err(Error::Unsupported("HyperShift keys on this keypad can't be changed yet".into()));
+        }
+        let (function, data_size, data) = action.encode();
+        let mut args = vec![cmd::KEYMAP_PROFILE, id, layer as u8, function, data_size];
+        args.extend_from_slice(&data);
+        self.transact(cmd::OBM_KEYMAP, cmd::OBM_KEYMAP_SIZE, &[cmd::KEYMAP_ID])?;
+        self.transact(cmd::KEY, cmd::KEYMAP_KEY_SIZE, &args)?;
+        Ok(())
+    }
+
+    /// Set a button or key in the live slot (or a keypad's on-board keymap). Returns whether
+    /// anything was sent: an unchanged one is left alone.
     pub fn set_input(&self, input: Input, layer: Layer, action: Action) -> Result<bool> {
         if self.input(input, layer).ok() == Some(action) {
             return Ok(false);
+        }
+        if let (true, Input::Key(id)) = (self.in_onboard_keymap(input), input) {
+            self.set_onboard_key(id, layer, action)?;
+            return Ok(true);
         }
         let (command, size, id) = input.command();
         let (function, data_size, data) = action.encode();
@@ -768,6 +852,9 @@ impl Device {
     /// without any software ("Save to mouse"). A flash write: only on request, never on a
     /// profile switch.
     pub fn set_slot_input(&self, slot: u8, input: Input, layer: Layer, action: Action) -> Result<()> {
+        if self.in_onboard_keymap(input) {
+            return Err(Error::Unsupported("this keypad keeps its keys on board already".into()));
+        }
         if !(1..=5).contains(&slot) {
             return Err(Error::InvalidArg(format!("on-board slot {slot}: use 1 to 5")));
         }
@@ -831,7 +918,11 @@ impl Device {
         if self.input(Input::Key(31), Layer::Normal).is_err() {
             return Vec::new();
         }
-        KEYS.iter().filter_map(|k| self.input(Input::Key(k.0), Layer::Normal).ok().map(|a| (k.0, a))).collect()
+        let thumbs: &[(u8, &str, &str, u8)] = if self.spec.as_ref().is_some_and(|s| s.onboard_keymap) { KEYPAD_THUMBS } else { &[] };
+        KEYS.iter()
+            .chain(thumbs)
+            .filter_map(|k| self.input(Input::Key(k.0), Layer::Normal).ok().map(|a| (k.0, a)))
+            .collect()
     }
 
     /// Button ids the mouse says it has (Synapse's "Get Button ID list"), in [`BUTTONS`]

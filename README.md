@@ -47,6 +47,8 @@ Things Secretarybird does that Synapse won't:
 - **Plain files.** Your settings are one `profiles.json`; back it up or copy it to another PC.
 - **Share the lights.** Hand a device's RGB to another app and keep using Secretarybird for
   everything else.
+- **Thumbstick at any angle.** On the Tartarus V2 Pro, turn the stick into WASD with forward
+  wherever your thumb wants it and diagonals that hold two keys, at the width you choose.
 - **Clean up after Razer.** [`secbird debloat`](#debloat) turns off Razer's background services,
   and `debloat undo` puts them back.
 

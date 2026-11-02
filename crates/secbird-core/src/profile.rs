@@ -63,6 +63,18 @@ pub struct Profile {
     /// Buttons not listed keep their saved on-board setting.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub buttons: BTreeMap<String, String>,
+    /// Thumbstick as keys (keypads with a stick, see [`crate::stick`]). Software only: the
+    /// tray presses the keys, nothing is written to the device. `None` leaves the stick alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stick: Option<crate::stick::Stick>,
+    /// The stick's settings while it is turned off, so turning it back on brings back the
+    /// angle, zones and keys instead of the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stick_off: Option<crate::stick::Stick>,
+    /// Synapse's Thumbstick Orientation: the keypad turns its stick a quarter turn clockwise
+    /// itself (as a controller, in analog mode). `None` leaves it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stick_rotated: Option<bool>,
 }
 
 /// `C:\Games\CS2.exe`, `cs2` or ` CS2.EXE ` -> `cs2.exe`. Empty when nothing is left.
@@ -170,6 +182,7 @@ impl DeviceProfiles {
             return vec![Applied { setting: format!("profile '{name}'"), result: Err(Error::NotFound(name.into())) }];
         };
         let mut out = profile.apply_settings(dev, !self.lighting_off);
+        out.extend(self.apply_stick(profile, dev));
         let saved = self.onboard.iter().flat_map(|o| o.before.keys());
         let others: std::collections::BTreeSet<&String> = self
             .profiles
@@ -181,6 +194,50 @@ impl DeviceProfiles {
         for key in others {
             let result = self.reset_button(key, dev);
             out.push(Applied { setting: format!("{key} back to saved"), result: result.map(|_| ()) });
+        }
+        out
+    }
+
+    /// The thumbstick as keys needs the keypad in driver mode and 8-way mode (it then sends
+    /// the stick's position only to Secretarybird, #21); unplugging undoes driver mode, so both
+    /// go with the profile. A profile without it puts the stick back to a controller, but only
+    /// when another profile of this device uses it: otherwise the stick is left as Synapse set it.
+    fn apply_stick(&self, profile: &Profile, dev: &Device) -> Vec<Applied> {
+        if !dev.spec.as_ref().is_some_and(|s| s.thumbstick) {
+            return Vec::new();
+        }
+        // Analog orientation: in key mode the keypad stays unturned (it turns the position it
+        // reports too), and key mode has its own Forward.
+        let turn = match (&profile.stick, profile.stick_rotated) {
+            (Some(_), _) => Some(false),
+            (None, rotated) => rotated,
+        };
+        let mut out = Vec::new();
+        if self.profiles.values().all(|p| p.stick.is_none()) {
+            if let Some(rotated) = turn {
+                out.push(Applied { setting: "thumbstick orientation".into(), result: dev.set_stick_rotated(rotated) });
+            }
+            return out;
+        }
+        out.extend(match profile.stick {
+            Some(_) => vec![
+                Applied { setting: "driver mode, for the thumbstick".into(), result: dev.set_driver_mode() },
+                Applied {
+                    setting: "thumbstick to 8-way".into(),
+                    result: dev.set_stick_mode(crate::stick::Mode::EightWay),
+                },
+            ],
+            None => vec![
+                Applied {
+                    setting: "thumbstick back to analog".into(),
+                    result: dev.set_stick_mode(crate::stick::Mode::Analog),
+                },
+                // Normal mode, where the keypad's own key remaps work again.
+                Applied { setting: "normal mode".into(), result: dev.set_normal_mode() },
+            ],
+        });
+        if let Some(rotated) = turn {
+            out.push(Applied { setting: "thumbstick orientation".into(), result: dev.set_stick_rotated(rotated) });
         }
         out
     }

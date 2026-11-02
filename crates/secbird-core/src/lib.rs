@@ -28,6 +28,8 @@ pub mod profile;
 pub mod proto;
 pub mod report;
 pub mod sim;
+pub mod keymap;
+pub mod stick;
 pub mod transport;
 pub mod update;
 

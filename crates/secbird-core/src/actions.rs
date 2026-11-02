@@ -25,6 +25,73 @@ fn check_lighting(dev: &Device, store: &mut Store) -> Result<()> {
     Ok(())
 }
 
+/// Thumbstick as keys for the active profile (`None` turns it off). Turning it on puts the
+/// keypad in driver mode and 8-way mode, so it sends the stick's position only to
+/// Secretarybird; turning it off makes the stick a game controller again. The tray reads the
+/// stick and presses the keys.
+pub fn set_stick(dev: &Device, store: &mut Store, stick: Option<crate::stick::Stick>) -> Result<Option<crate::stick::Stick>> {
+    if !dev.spec.as_ref().is_some_and(|s| s.thumbstick) {
+        return Err(crate::error::Error::Unsupported(format!("{} has no thumbstick", dev.name())));
+    }
+    let stick = stick.map(crate::stick::Stick::checked).transpose()?;
+    // The analog orientation as it is now, kept before key mode changes it (below).
+    let analog_turn = dev.stick_rotated().ok();
+    let profile = store.for_device(dev).active_mut();
+    let was_on = profile.stick.is_some();
+    if stick.is_some() && !was_on && profile.stick_rotated.is_none() {
+        profile.stick_rotated = analog_turn;
+    }
+    let restore_turn = profile.stick_rotated;
+    // Off keeps the settings aside; on without settings of its own takes them back.
+    let stick = match stick {
+        Some(s) => Some(s),
+        None => {
+            if let Some(old) = profile.stick.take() {
+                profile.stick_off = Some(old);
+            }
+            None
+        }
+    };
+    if stick.is_some() {
+        profile.stick_off = None;
+    }
+    profile.stick = stick.clone();
+    store.save()?;
+    match (&stick, was_on) {
+        (Some(_), false) => {
+            dev.set_driver_mode()?;
+            dev.set_stick_mode(crate::stick::Mode::EightWay)?;
+            // The keypad turns the position it reports in key mode too: key mode reads it
+            // unturned and has its own Forward.
+            dev.set_stick_rotated(false)?;
+        }
+        (None, true) => {
+            dev.set_stick_mode(crate::stick::Mode::Analog)?;
+            // Back to normal mode, where the keypad's own key remaps work again.
+            dev.set_normal_mode()?;
+            if let Some(rotated) = restore_turn {
+                dev.set_stick_rotated(rotated)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(stick)
+}
+
+/// Synapse's Thumbstick Orientation (the keypad's own quarter turn), saved to the active profile.
+pub fn set_stick_rotated(dev: &Device, store: &mut Store, rotated: bool) -> Result<()> {
+    if !dev.spec.as_ref().is_some_and(|s| s.thumbstick) {
+        return Err(crate::error::Error::Unsupported(format!("{} has no thumbstick", dev.name())));
+    }
+    let profile = store.for_device(dev).active_mut();
+    // In key mode the keypad stays unturned; this is for when the stick is a controller again.
+    if profile.stick.is_none() {
+        dev.set_stick_rotated(rotated)?;
+    }
+    profile.stick_rotated = Some(rotated);
+    store.save()
+}
+
 /// Returns the DPI actually set, after rounding to the device's step.
 pub fn set_dpi(dev: &Device, store: &mut Store, x: u16, y: u16) -> Result<(u16, u16)> {
     let applied = dev.set_dpi(x, y)?;
