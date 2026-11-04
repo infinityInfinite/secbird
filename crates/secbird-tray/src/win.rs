@@ -1,4 +1,4 @@
-use crate::engine::{ApplyReport, Battery, Engine};
+use crate::engine::{ApplyReport, Battery, Engine, LightsRetry, DIM_FOR, RELIGHT_FOR};
 use secbird_core::log;
 use std::collections::{HashMap, HashSet};
 use crate::settings::{autostart_enabled, open_config_folder, set_autostart, TraySettings};
@@ -12,6 +12,7 @@ use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -466,7 +467,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_TIMER if wparam == TIMER_LIGHTS => {
             with_app(|app| {
                 let mut engine = app.engine();
-                engine.retry_lights_back();
+                let relit = engine.retry_lights_back();
+                let dimmed = engine.retry_lights_away();
+                log_retry(&engine, "back", &relit);
+                log_retry(&engine, "away", &dimmed);
                 engine.refresh_frames();
                 engine.keep_laptops_lit();
             });
@@ -493,6 +497,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+/// Log what a retry of the lights while away (or back) did, if anything.
+fn log_retry(engine: &Engine, what: &str, retry: &LightsRetry) {
+    if !retry.done.is_empty() {
+        log::append(&format!("lights {what}: {} answered on a retry", engine.names(&retry.done)));
+    }
+    if !retry.gave_up.is_empty() {
+        log::append(&format!("lights {what}: gave up on {} (not answering)", engine.names(&retry.gave_up)));
+    }
+}
+
+/// `; not answering: <names>, trying again for <n> s` for devices that missed a lights write.
+fn missed_note(engine: &Engine, missed: &[String], window: Duration) -> String {
+    if missed.is_empty() {
+        return String::new();
+    }
+    format!("; not answering: {}, trying again for {} s", engine.names(missed), window.as_secs())
 }
 
 /// A window came to the front: (re)start the settle timer.
@@ -551,12 +573,13 @@ impl App {
         let mut engine = self.engine();
         match percent {
             Some(percent) if !engine.is_away() => {
-                log::append(&format!("{}: lights to {percent}%", if locked { "locked" } else { "screen off" }));
-                engine.lights_away(percent);
+                let missed = engine.lights_away(percent);
+                let why = if locked { "locked" } else { "screen off" };
+                log::append(&format!("{why}: lights to {percent}%{}", missed_note(&engine, &missed, DIM_FOR)));
             }
             None if engine.is_away() => {
-                log::append("back: lights as saved");
-                engine.lights_back();
+                let missed = engine.lights_back();
+                log::append(&format!("back: lights as saved{}", missed_note(&engine, &missed, RELIGHT_FOR)));
             }
             _ => {}
         }

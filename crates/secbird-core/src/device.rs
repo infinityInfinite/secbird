@@ -44,22 +44,25 @@ impl Device {
         self.transport.report_id()
     }
 
-    /// A Mouse Dock Pro is the docked mouse's receiver: every command reaches the mouse.
+    /// A mouse dock is the docked mouse's receiver: every command reaches the mouse.
     /// Ask which mouse is paired and take its name, DPI range and lighting zones. Polling
     /// stays on the dock's `00:C0` command. If the answer is missing or isn't a mouse that
     /// pairs with the dock, keep the generic database entry.
     pub(crate) fn identify_docked_mouse(&mut self, db: &Db) {
-        if self.pid != MOUSE_DOCK_PRO {
-            return;
-        }
+        let dock = match self.pid {
+            MOUSE_DOCK_PRO => "Mouse Dock Pro",
+            MOUSE_DOCK_V2_PRO => "Mouse Dock V2 Pro",
+            _ => return,
+        };
         let Ok(reply) = self.get(cmd::WIRELESS_DEVICES, cmd::WIRELESS_DEVICES_SIZE, &[]) else { return };
         let Some(pid) = connected_mouse_pid(reply.args()).filter(|p| DOCK_PRO_MICE.contains(p)) else { return };
         let Some(mouse) = db.get(pid).filter(|s| s.kind == Kind::Mouse) else { return };
         if let Some(spec) = &mut self.spec {
-            spec.name = format!("{} on Mouse Dock Pro", mouse.name.trim_end_matches(" (Wireless)"));
+            spec.name = format!("{} on {dock}", mouse.name.trim_end_matches(" (Wireless)"));
             spec.dpi = mouse.dpi.clone();
             spec.lighting = mouse.lighting;
             spec.leds = mouse.leds.clone();
+            spec.unsupported_effects = mouse.unsupported_effects.clone();
             spec.onboard_profiles = mouse.onboard_profiles;
         }
     }
@@ -162,7 +165,7 @@ fn parse_serial(args: &[u8]) -> String {
 }
 
 pub(crate) const MOUSE_DOCK_PRO: u16 = 0x00A4;
-/// Mouse Dock V2 Pro. Not in the database yet; assumed to work like the Mouse Dock Pro.
+/// Mouse Dock V2 Pro. Works like the Mouse Dock Pro (#61, #72).
 pub(crate) const MOUSE_DOCK_V2_PRO: u16 = 0x00F1;
 
 /// Transaction id that reaches a mouse dock itself rather than the docked mouse.
@@ -175,6 +178,7 @@ pub const DOCK_LED: u8 = 0x0F;
 pub(crate) const HYPERPOLLING_DONGLE: u16 = 0x00B3;
 
 /// Mice that pair with the Mouse Dock Pro (Synapse's `DualDongleCompatibleDevices.json`).
+/// The V2 Pro is assumed to take the same ones (seen with 00E3 and 00E8).
 const DOCK_PRO_MICE: [u16; 11] =
     [0x00A8, 0x00AB, 0x00B0, 0x00CD, 0x00D7, 0x00DB, 0x00DF, 0x00E3, 0x00E8, 0x00EA, 0xB00B];
 
