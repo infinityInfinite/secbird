@@ -38,22 +38,31 @@ impl Device {
         }
     }
 
-    /// A Mouse Dock Pro is the docked mouse's receiver: every command reaches the mouse.
+    /// The feature report id commands go out under: 0 over USB, the declared one over
+    /// Bluetooth (see [`crate::transport::NumberedReport`]).
+    pub fn report_id(&self) -> u8 {
+        self.transport.report_id()
+    }
+
+    /// A mouse dock is the docked mouse's receiver: every command reaches the mouse.
     /// Ask which mouse is paired and take its name, DPI range and lighting zones. Polling
     /// stays on the dock's `00:C0` command. If the answer is missing or isn't a mouse that
     /// pairs with the dock, keep the generic database entry.
     pub(crate) fn identify_docked_mouse(&mut self, db: &Db) {
-        if self.pid != MOUSE_DOCK_PRO {
-            return;
-        }
+        let dock = match self.pid {
+            MOUSE_DOCK_PRO => "Mouse Dock Pro",
+            MOUSE_DOCK_V2_PRO => "Mouse Dock V2 Pro",
+            _ => return,
+        };
         let Ok(reply) = self.get(cmd::WIRELESS_DEVICES, cmd::WIRELESS_DEVICES_SIZE, &[]) else { return };
         let Some(pid) = connected_mouse_pid(reply.args()).filter(|p| DOCK_PRO_MICE.contains(p)) else { return };
         let Some(mouse) = db.get(pid).filter(|s| s.kind == Kind::Mouse) else { return };
         if let Some(spec) = &mut self.spec {
-            spec.name = format!("{} on Mouse Dock Pro", mouse.name.trim_end_matches(" (Wireless)"));
+            spec.name = format!("{} on {dock}", mouse.name.trim_end_matches(" (Wireless)"));
             spec.dpi = mouse.dpi.clone();
             spec.lighting = mouse.lighting;
             spec.leds = mouse.leds.clone();
+            spec.unsupported_effects = mouse.unsupported_effects.clone();
             spec.onboard_profiles = mouse.onboard_profiles;
         }
     }
@@ -79,17 +88,53 @@ impl Device {
     pub(crate) fn identify_receiver(&mut self, db: &Db) {
         self.identify_docked_mouse(db);
         self.identify_hyperpolling_mouse(db);
+        self.add_dock_light();
+    }
+
+    /// A mouse dock's own light is one more zone beside the docked mouse's (#39).
+    fn add_dock_light(&mut self) {
+        if !self.is_mouse_dock() {
+            return;
+        }
+        if let Some(spec) = self.spec.as_mut().filter(|s| !s.leds.iter().any(|l| l.id == DOCK_LED)) {
+            spec.leds.push(crate::db::Led { name: "dock".into(), id: DOCK_LED });
+        }
+    }
+
+    /// Whether `led` is a dock's own light, reached with [`DOCK_TXID`] and the newer
+    /// lighting commands whatever the docked mouse uses.
+    pub(crate) fn is_dock_led(&self, led: u8) -> bool {
+        self.is_mouse_dock() && led == DOCK_LED
+    }
+
+    /// [`Device::transact`] for a lighting command to `led`, sent to the dock for its light.
+    pub(crate) fn transact_led(&self, led: u8, command: Command, size: u8, args: &[u8]) -> Result<Report> {
+        if self.is_dock_led(led) {
+            self.transact_as(DOCK_TXID, command, size, args)
+        } else {
+            self.transact(command, size, args)
+        }
     }
 
     /// Send one command and wait for its reply. `size` is the argument length the
     /// device expects for this command.
     pub fn transact(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES)
+        transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES, false)
     }
 
     /// [`Device::transact`] for commands that write flash and answer slowly.
     pub(crate) fn transact_slow(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES)
+        transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES, false)
+    }
+
+    /// [`Device::transact`] with another transaction id (see [`DOCK_TXID`]).
+    pub fn transact_as(&self, txid: u8, command: Command, size: u8, args: &[u8]) -> Result<Report> {
+        transact(self.transport.as_ref(), txid, command, size, args, READ_RETRIES, true)
+    }
+
+    /// Whether this is a mouse dock, whose own settings take [`DOCK_TXID`].
+    pub fn is_mouse_dock(&self) -> bool {
+        matches!(self.pid, MOUSE_DOCK_PRO | MOUSE_DOCK_V2_PRO)
     }
 
     pub fn get(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
@@ -119,12 +164,21 @@ fn parse_serial(args: &[u8]) -> String {
     if usable { s } else { String::new() }
 }
 
-const MOUSE_DOCK_PRO: u16 = 0x00A4;
+pub(crate) const MOUSE_DOCK_PRO: u16 = 0x00A4;
+/// Mouse Dock V2 Pro. Works like the Mouse Dock Pro (#61, #72).
+pub(crate) const MOUSE_DOCK_V2_PRO: u16 = 0x00F1;
+
+/// Transaction id that reaches a mouse dock itself rather than the docked mouse.
+/// Synapse's dock class (`rzDevice25Linker`) sends `0xE0 | n`; not yet seen on hardware.
+pub const DOCK_TXID: u8 = 0xFF;
+/// The dock's own light (Synapse `DockedLED`, the dock's brightness region).
+pub const DOCK_LED: u8 = 0x0F;
 
 /// The HyperPolling wireless dongle. It answers for the mouse paired to it.
 pub(crate) const HYPERPOLLING_DONGLE: u16 = 0x00B3;
 
 /// Mice that pair with the Mouse Dock Pro (Synapse's `DualDongleCompatibleDevices.json`).
+/// The V2 Pro is assumed to take the same ones (seen with 00E3 and 00E8).
 const DOCK_PRO_MICE: [u16; 11] =
     [0x00A8, 0x00AB, 0x00B0, 0x00CD, 0x00D7, 0x00DB, 0x00DF, 0x00E3, 0x00E8, 0x00EA, 0xB00B];
 
@@ -140,7 +194,9 @@ fn connected_mouse_pid(args: &[u8]) -> Option<u16> {
     connected.next().is_none().then_some(pid)
 }
 
-fn transact(hid: &dyn Transport, txid: u8, command: Command, size: u8, args: &[u8], retries: u32) -> Result<Report> {
+/// `exact`: only accept a reply carrying our txid. A dock forwards the docked mouse's
+/// replies, which would otherwise pass for the dock's own.
+fn transact(hid: &dyn Transport, txid: u8, command: Command, size: u8, args: &[u8], retries: u32, exact: bool) -> Result<Report> {
     let req = Report::request(txid, command, size, args);
     let mut buf = [0u8; REPORT_LEN + 1]; // byte 0 is the HID report id (0)
     buf[1..].copy_from_slice(&req.0);
@@ -156,7 +212,7 @@ fn transact(hid: &dyn Transport, txid: u8, command: Command, size: u8, args: &[u
         let mut body = [0u8; REPORT_LEN];
         body.copy_from_slice(&reply[n - REPORT_LEN..n]);
         let rep = Report(body);
-        if rep.command() != command {
+        if rep.command() != command || (exact && rep.txid() != txid) {
             continue;
         }
         match rep.status() {
@@ -211,7 +267,7 @@ fn discover_hid(api: &HidApi, db: &Db) -> Vec<Device> {
 
     pids.into_iter()
         .filter_map(|pid| -> Option<Vec<Device>> {
-            let spec = db.get(pid).cloned();
+            let spec = db.spec(pid);
             let mut ifaces: Vec<&Candidate> = all.iter().filter(|c| c.pid == pid).collect();
             // Known interface first; the rest still get a chance.
             if let Some(want) = spec.as_ref().and_then(|s| s.interface) {
@@ -240,8 +296,33 @@ fn discover_hid(api: &HidApi, db: &Db) -> Vec<Device> {
 }
 
 fn probe(api: &HidApi, c: &Candidate, txids: &[u8], spec: Option<DeviceSpec>) -> Option<Device> {
-    let hid = api.open_path(&c.path).ok()?;
-    Device::open(Box::new(hid), c.pid, c.interface, c.path.clone(), txids, spec)
+    open_interface(api, &c.path, c.pid, c.interface, txids, spec)
+}
+
+/// Open one HID interface and probe it. If it doesn't answer the USB way, try each
+/// numbered feature report long enough for a Razer report (Bluetooth: #10, #51).
+pub fn open_interface(
+    api: &HidApi,
+    path: &std::ffi::CStr,
+    pid: u16,
+    interface: i32,
+    txids: &[u8],
+    spec: Option<DeviceSpec>,
+) -> Option<Device> {
+    let mut numbered: Vec<(u8, usize)> = crate::transport::feature_reports(api, path)
+        .into_iter()
+        .filter(|&(id, len)| id != 0 && len >= REPORT_LEN)
+        .collect();
+    numbered.sort_by_key(|&(_, len)| len != REPORT_LEN); // exactly 90 bytes first
+    let hid = api.open_path(path).ok()?;
+    if let Some(dev) = Device::open(Box::new(hid), pid, interface, path.to_owned(), txids, spec.clone()) {
+        return Some(dev);
+    }
+    numbered.into_iter().find_map(|(id, len)| {
+        let inner = api.open_path(path).ok()?;
+        let transport = crate::transport::NumberedReport { inner, id, len };
+        Device::open(Box::new(transport), pid, interface, path.to_owned(), txids, spec.clone())
+    })
 }
 
 impl Device {
@@ -255,7 +336,7 @@ impl Device {
         spec: Option<DeviceSpec>,
     ) -> Option<Device> {
         let (txid, reply) = txids.iter().copied().find_map(|t| {
-            transact(transport.as_ref(), t, cmd::SERIAL.get(), cmd::SERIAL_SIZE, &[], READ_RETRIES).ok().map(|r| (t, r))
+            transact(transport.as_ref(), t, cmd::SERIAL.get(), cmd::SERIAL_SIZE, &[], READ_RETRIES, false).ok().map(|r| (t, r))
         })?;
         let serial = parse_serial(reply.args());
         Some(Device { transport, pid, serial, interface, path, txid, spec })

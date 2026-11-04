@@ -238,10 +238,15 @@ impl Server {
     }
 }
 
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
 #[derive(Deserialize)]
 struct Body {
-    /// Device key (`PID:SERIAL`); older clients send only `pid`.
-    #[serde(default)]
+    /// Device key (`PID:SERIAL`); older clients send only `pid`. The editor sends null when
+    /// no device can be controlled (#51), which the app-wide requests don't need.
+    #[serde(default, deserialize_with = "null_as_empty")]
     id: String,
     #[serde(default)]
     pid: String,
@@ -263,6 +268,9 @@ struct Body {
     name: String,
     #[serde(default)]
     keys: Vec<String>,
+    /// Finding a keyboard's layout: the `[row, col]` light to show; none puts the profile back.
+    #[serde(default)]
+    light: Option<(u8, u8)>,
     #[serde(default)]
     apps: Vec<String>,
     /// A Settings page switch (`key`) and whether it is on; `data` for an imported file.
@@ -295,6 +303,9 @@ struct Body {
     /// Laptop keyboard when idle: stays-lit, half, quarter or dark.
     #[serde(default)]
     dimming: String,
+    /// Keyboards: the keys gaming mode blocks, `off` or like `win,alt-tab`.
+    #[serde(default)]
+    game_mode: String,
     /// Macro steps as text (`tap:ctrl+c wait:50`), and a macro id.
     #[serde(default)]
     script: String,
@@ -308,23 +319,32 @@ struct Body {
 /// Every button of a mouse with what it does on each layer, and which ones the active
 /// profile remaps.
 fn buttons_json(dev: &Device, store: &mut Store) -> Value {
-    use secbird_core::buttons::{button_label, button_name, setting_key, Layer};
-    let remapped = &store.for_device(dev).active().buttons;
-    let list: Vec<Value> = dev
-        .buttons()
+    use secbird_core::buttons::{setting_key, Input, Layer};
+    // Keyboards, keypads and laptops list their keys; everything else its mouse buttons.
+    let keyboard = dev.spec.as_ref().is_some_and(|s| matches!(s.kind, Kind::Keyboard | Kind::Keypad | Kind::Laptop));
+    let inputs: Vec<(Input, _)> = match keyboard {
+        true => dev.keys().into_iter().map(|(id, a)| (Input::Key(id), a)).collect(),
+        false => dev.buttons().into_iter().map(|(id, a)| (Input::Button(id), a)).collect(),
+    };
+    let profiles = store.for_device(dev);
+    let remapped = &profiles.active().buttons;
+    let onboard = profiles.onboard.as_ref();
+    // Before a "Save to mouse" the slot holds our remap; the original is in its backup.
+    let original = |key: &str| onboard.and_then(|o| o.before.get(key)).cloned();
+    let list: Vec<Value> = inputs
         .into_iter()
-        .map(|(id, normal)| {
-            let name = button_name(id);
-            let hyper = dev.button(id, Layer::HyperShift).map(|a| a.to_string()).ok();
+        .map(|(input, normal)| {
+            let name = input.name();
+            let hyper = dev.input(input, Layer::HyperShift).map(|a| a.to_string()).ok();
             let is_remapped = |layer| remapped.contains_key(&setting_key(&name, layer));
-            // What the mouse itself holds: the live value unless the active profile remapped it.
+            // What the device itself holds: the live value unless the active profile remapped it.
             let saved = |layer, live: Option<String>| match is_remapped(layer) {
-                true => dev.saved_button(id, layer).map(|a| a.to_string()).ok(),
+                true => original(&setting_key(&name, layer)).or_else(|| dev.saved_input(input, layer).map(|a| a.to_string()).ok()),
                 false => live,
             };
             json!({
                 "name": name,
-                "label": button_label(id),
+                "label": input.label(),
                 "normal": normal.to_string(),
                 "hypershift": hyper,
                 "remapped": { "normal": is_remapped(Layer::Normal), "hypershift": is_remapped(Layer::HyperShift) },
@@ -335,7 +355,12 @@ fn buttons_json(dev: &Device, store: &mut Store) -> Value {
             })
         })
         .collect();
-    json!({ "buttons": list })
+    // What "Save to mouse" put in the mouse's slot, and whether that profile changed since.
+    let onboard = onboard.map(|o| {
+        let changed = profiles.profiles.get(&o.profile).map(|p| &p.buttons) != Some(&o.buttons);
+        json!({ "slot": o.slot, "profile": o.profile, "count": o.buttons.len(), "changed": changed })
+    });
+    json!({ "buttons": list, "onboard": onboard })
 }
 
 fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
@@ -377,6 +402,10 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 actions::set_dimming(dev, &mut store, b.dimming.parse()?)?;
                 Ok(json!({ "dimming": dev.dimming().ok().flatten().map(|d| d.to_string()) }))
             }
+            "/api/gaming" => {
+                actions::set_game_mode(dev, &mut store, b.game_mode.parse()?)?;
+                Ok(json!({ "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()) }))
+            }
             "/api/sleep" => {
                 if let Some(on) = b.auto {
                     actions::set_auto_sleep(dev, &mut store, on)?;
@@ -396,9 +425,28 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 let keys = b.keys.iter().map(|k| k.parse::<Rgb>()).collect::<Result<Vec<_>, _>>()?;
                 actions::set_keys(dev, &mut store, keys).map(|_| json!({}))
             }
+            "/api/find-light" => match b.light {
+                Some((row, col)) => actions::show_light(dev, &mut store, row, col).map(|_| json!({})),
+                None => {
+                    let failures: Vec<String> =
+                        engine.apply(&[dev.key()]).into_iter().flat_map(|r| r.failures).collect();
+                    match failures.is_empty() {
+                        true => Ok(json!({})),
+                        false => Err(Error::InvalidArg(failures.join("; "))),
+                    }
+                }
+            },
             "/api/buttons" => Ok(buttons_json(dev, &mut store)),
             "/api/buttons-restore" => {
                 actions::restore_all_buttons(dev, &mut store)?;
+                Ok(buttons_json(dev, &mut store))
+            }
+            "/api/save-to-mouse" => {
+                actions::save_buttons_to_mouse(dev, &mut store)?;
+                Ok(buttons_json(dev, &mut store))
+            }
+            "/api/put-back" => {
+                actions::put_back_onboard(dev, &mut store)?;
                 Ok(buttons_json(dev, &mut store))
             }
             "/api/macros" => macros_json(dev),
@@ -480,6 +528,9 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
         }
     };
 
+    if path == "/api/find-light" {
+        engine.pause_frames(b.light.is_some());
+    }
     match attempt(engine) {
         Err(Error::Hid(_)) | Err(Error::NotFound(_)) | Err(Error::NoReply(_)) => {
             engine.rescan();
@@ -529,7 +580,9 @@ fn settings_json(engine: &Engine) -> Value {
         "firmware_weekly": s.firmware_weekly,
         "popups": !s.popups_off,
         "battery_warning": !s.battery_warning_off,
+        "battery_warning_at": s.low_battery(),
         "auto_switch": !s.auto_switch_off,
+        "away_lights": s.away_lights.as_deref().unwrap_or(""),
         "synapse": engine.synapse(),
     })
 }
@@ -546,7 +599,26 @@ fn app_post(engine: &mut Engine, path: &str, b: &Body) -> Option<Result<Value, E
                 "firmware_weekly" => s.firmware_weekly = b.on,
                 "popups" => s.popups_off = !b.on,
                 "battery_warning" => s.battery_warning_off = !b.on,
+                "battery_warning_at" => {
+                    let range = crate::settings::BATTERY_RANGE;
+                    if !range.contains(&b.value) {
+                        return Some(Err(Error::InvalidArg(format!(
+                            "pick a battery warning level from {}% to {}%",
+                            range.start(),
+                            range.end()
+                        ))));
+                    }
+                    s.battery_warning_at = Some(b.value);
+                }
                 "auto_switch" => s.auto_switch_off = !b.on,
+                // `data`: "dim", "off", or "" to leave the lights as they are.
+                "away_lights" => {
+                    let want = b.data.as_str().unwrap_or_default();
+                    if !want.is_empty() && !crate::settings::AWAY_LIGHTS.iter().any(|(name, _)| *name == want) {
+                        return Some(Err(Error::InvalidArg(format!("unknown choice '{want}' for the lights when away"))));
+                    }
+                    s.away_lights = (!want.is_empty()).then(|| want.to_string());
+                }
                 other => return Some(Err(Error::InvalidArg(format!("unknown setting '{other}'")))),
             }
             s.save();
@@ -572,7 +644,7 @@ fn app_post(engine: &mut Engine, path: &str, b: &Body) -> Option<Result<Value, E
             let incoming: Store = serde_json::from_value(b.data.clone())
                 .map_err(|e| Error::InvalidArg(format!("not a Secretarybird export: {e}")))?;
             let mut store = Store::load(&config_dir().join("profiles.json"))?;
-            let added = store.import(incoming);
+            let added = store.import_for(incoming, &engine.all_keys());
             store.save()?;
             Ok(json!({ "added": added, "state": state(engine) }))
         })(),
@@ -667,12 +739,18 @@ fn device_json(dev: &Device) -> Value {
         "firmware": dev.firmware_version().ok(),
         // Read once at discovery; asking the device again costs a USB round trip per page load.
         "serial": (!dev.serial.is_empty()).then(|| dev.serial.clone()),
-        "dpi": dev.dpi().ok().map(|(x, y)| json!({
-            "x": x, "y": y,
-            "min": dpi_range.map_or(100, |r| r.min),
-            "max": dpi_range.map_or(20000, |r| r.max),
-            "step": dpi_range.map_or(50, |r| r.step),
-        })),
+        // Some keyboards acknowledge DPI reads but return zero; only mice have DPI.
+        // Keep probing unknown devices, as with polling and DPI stages.
+        "dpi": spec
+            .is_none_or(|s| s.kind == Kind::Mouse)
+            .then(|| dev.dpi().ok())
+            .flatten()
+            .map(|(x, y)| json!({
+                "x": x, "y": y,
+                "min": dpi_range.map_or(100, |r| r.min),
+                "max": dpi_range.map_or(20000, |r| r.max),
+                "step": dpi_range.map_or(50, |r| r.step),
+            })),
         // Mousepads and docks answer the polling question too, but have no polling rate to
         // set: only show it where the device list says there is one (or the model is unknown).
         "polling": spec
@@ -688,9 +766,12 @@ fn device_json(dev: &Device) -> Value {
             .map(|s| json!({ "active": s.active, "list": s.stages, "max": secbird_core::commands::MAX_DPI_STAGES })),
         "sleep": sleep_json(dev),
         "dimming": dev.dimming().ok().flatten().map(|d| d.to_string()),
+        // Only keyboards that answer the read get the Gaming section.
+        "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()),
         "macros": dev.macro_storage().is_ok(),
-        "matrix": spec.and_then(|s| s.matrix).map(|m| json!({ "rows": m.rows, "cols": m.cols })),
+        "matrix": spec.and_then(|s| s.matrix).map(|m| json!({ "rows": m.rows, "cols": m.cols, "first": m.first })),
         "leds": spec.map(|s| s.leds.iter().map(|l| json!({ "name": l.name, "id": l.id })).collect::<Vec<_>>()).unwrap_or_default(),
+        "unsupported_effects": spec.map(|s| s.unsupported_effects.as_slice()).unwrap_or_default(),
         "profiles": profile_names,
         "active": active,
         "profile": profile,

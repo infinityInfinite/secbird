@@ -28,6 +28,16 @@
   html { scrollbar-color: var(--line-strong) transparent; accent-color: var(--accent); }
   [hidden] { display: none !important; }
   .num { font-variant-numeric: tabular-nums; }
+  .pct-box { display: inline-flex; align-items: center; height: 36px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .pct-box:hover { border-color: var(--line-strong); }
+  .pct-box:focus-within { border-color: var(--accent); }
+  .pct-box input.pct { width: 3ch; padding: 0 !important; border: 0 !important; background: none !important; text-align: right; font-weight: 650; appearance: textfield; }
+  .pct-box input.pct::-webkit-inner-spin-button, .pct-box input.pct::-webkit-outer-spin-button { appearance: none; margin: 0; }
+  .pct-box input.pct:focus-visible { outline: none; }
+  .pct-box .unit { color: var(--muted); font-weight: 600; padding: 0 4px 0 1px; }
+  .pct-box button { width: 32px; height: 100%; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 17px; line-height: 1; padding: 0; }
+  .pct-box button:hover:not(:disabled) { color: var(--text); background: var(--panel); }
+  .pct-box button:disabled { opacity: .35; cursor: default; }
   .ico { width: 12px; height: 12px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; flex: none; }
 
   /* Top bar: brand, devices, actions for every device. */
@@ -142,6 +152,7 @@
   .sw { width: 16px; height: 16px; border-radius: 5px; border: 1px solid #00000066; flex: none; display: inline-block; }
   .sw.off { background: none; border: 1.5px dashed var(--line-strong); }
   .subhead { margin: 18px 0 8px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .morekeys summary { cursor: pointer; width: fit-content; }
   /* Naga side grid: a keypad, laid out like the mouse. */
   .keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 168px)); gap: 6px; }
   .keypad .tile { min-height: 52px; padding: 6px 10px 7px; }
@@ -245,6 +256,22 @@
   #kb rect { fill: var(--key-fill); stroke: var(--key-stroke); stroke-width: .03; transition: fill .12s; cursor: crosshair; }
   #kb g:hover rect { stroke: var(--muted); }
   #kb text { fill: var(--key-text); font-size: .24px; pointer-events: none; text-anchor: middle; dominant-baseline: central; }
+  #remapkb { width: 100%; min-width: 600px; max-width: 1040px; height: auto; user-select: none; -webkit-user-select: none; }
+  #remapkb rect { fill: var(--key-fill); stroke: var(--key-stroke); stroke-width: .03; }
+  #remapkb text { fill: var(--key-text); font-size: .24px; pointer-events: none; text-anchor: middle; dominant-baseline: central; }
+  #remapkb text.act { fill: var(--accent-text); font-size: .17px; }
+  #remapkb g[data-row] { cursor: pointer; outline: none; }
+  #remapkb g[data-row]:hover rect { stroke: var(--muted); }
+  #remapkb g.changed rect { fill: var(--lit); stroke: var(--accent); }
+  #remapkb g[aria-pressed=true] rect, #remapkb g[data-row]:focus-visible rect { stroke: var(--lit-edge); stroke-width: .07; }
+  #remapkb g.none { opacity: .4; }
+  .lightgrid { display: grid; gap: 3px; min-width: 600px; max-width: 1040px; }
+  .lightgrid button { aspect-ratio: 1; min-width: 0; padding: 0; border: 1px solid var(--key-stroke); border-radius: 4px; background: var(--key-fill);
+    color: var(--key-text); font-size: 10px; line-height: 1.1; overflow: hidden; cursor: pointer; overflow-wrap: anywhere; }
+  .lightgrid button.named { border-color: var(--line-strong); color: var(--text); }
+  .lightgrid button.none { color: var(--faint); }
+  .lightgrid button.at { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .finder input { min-width: 240px; }
   .hint { color: var(--muted); font-size: 13px; margin: 0; }
   .hint b { color: var(--text); font-weight: 600; }
 
@@ -280,18 +307,35 @@
   .ov-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 14px; }
   .ov-head h1 { margin: 0; font-size: 20px; font-weight: 650; }
   .ov-head span { color: var(--muted); font-size: 13px; }
-  .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
-  .dcard { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 9px; transition: border-color .15s, transform .15s; }
+  .ov-group { display: flex; align-items: center; gap: 8px; margin: 26px 0 12px; color: var(--muted); font-size: 14px; font-weight: 600; }
+  .ov-group:first-child { margin-top: 0; }
+  .ov-group .dart { width: 20px; height: 20px; }
+  .ov-group span { color: var(--faint); font-weight: 400; }
+  .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 14px; }
+  .dcard { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; cursor: pointer; display: grid; grid-template-columns: 48px minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 16px; row-gap: 16px; color: var(--text); transition: border-color .15s, transform .15s; }
   .dcard:hover { border-color: var(--line-strong); transform: translateY(-2px); }
   .dcard.muted { cursor: default; opacity: .6; }
   .dcard.muted:hover { transform: none; border-color: var(--line); }
-  .dtop { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
-  .dcard h3 { margin: 0; font-size: 15px; font-weight: 650; min-width: 0; line-height: 1.3; overflow-wrap: anywhere;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .dtile { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 11px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); transition: color .15s, border-color .15s; }
+  .dtile .dart { width: 28px; height: 28px; }
+  .dcard:hover .dtile { color: var(--accent); border-color: var(--line-strong); }
+  .did { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .dsub { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; min-width: 0; }
+  .dfoot { grid-column: 1 / -1; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
+  .dstats { display: flex; gap: 26px; min-width: 0; }
+  .dstats div { display: flex; flex-direction: column; min-width: 0; }
+  .dstats small { color: var(--muted); font-size: 12px; }
+  .dstats b { color: var(--value); font-size: 17px; font-weight: 650; white-space: nowrap; }
+  .dstats b.quiet { color: var(--muted); font-weight: 400; font-size: 14px; white-space: normal; }
+  .dsub .ell { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dcard h3 { margin: 0; color: var(--text); font-size: 16.5px; font-weight: 650; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dcard .dots { flex-wrap: nowrap; gap: 6px; min-height: 0; }
+  .dcard .dots i { width: 14px; height: 14px; }
+  .dart { width: 26px; height: 26px; stroke: currentColor; stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .dart .f { fill: currentColor; stroke: none; }
   .dots { display: flex; gap: 7px; min-height: 16px; flex-wrap: wrap; }
   .dots i { width: 16px; height: 16px; border-radius: 50%; background: currentColor; border: 1px solid #00000066; }
   .dots i.off { background: none; border: 1.5px dashed var(--line-strong); }
-  .dmeta { color: var(--muted); font-size: 12.5px; }
   .batt { display: flex; align-items: center; gap: 6px; }
   .batt b { width: 22px; height: 11px; border: 1.5px solid currentColor; border-radius: 3px; position: relative; }
   .batt b::after { content: ""; position: absolute; left: 1px; top: 1px; bottom: 1px; width: calc((100% - 2px) * var(--lvl)); background: currentColor; border-radius: 1px; }
@@ -405,7 +449,7 @@
 
   <section class="overview" id="overview" hidden>
     <div class="ov-head"><h1>All devices</h1><span id="ovSummary"></span></div>
-    <div class="ov-grid" id="ovGrid"></div>
+    <div id="ovGroups"></div>
   </section>
 
   <div class="devbar" id="devbar" hidden>
@@ -453,12 +497,12 @@ const el = (tag, { dataset, ...props } = {}, ...kids) => { const e = Object.assi
 // so presets use pure channels. Orange and yellow need far less green than on a monitor.
 const PRESETS = [['FF0000','Red'],['FF2800','Orange'],['FF9600','Yellow'],['00FF00','Green'],['00FFFF','Cyan'],
                  ['0000FF','Blue'],['5000FF','Purple'],['FF00FF','Magenta'],['FF0028','Pink'],['FFFFFF','White']];
-const NAMES = { scroll: 'Scroll wheel', logo: 'Logo', underglow: 'Underglow', backlight: 'Backlight' };
+const NAMES = { scroll: 'Scroll wheel', logo: 'Logo', underglow: 'Underglow', backlight: 'Backlight', side: 'Side plate', profile: 'Profile light', dock: 'Dock' };
 const KINDS = { mouse: 'Mouse', keyboard: 'Keyboard', laptop: 'Laptop', keypad: 'Keypad', mousepad: 'Mousepad',
   headset: 'Headset', accessory: 'Accessory', unknown: 'Device' };
 let devices = [], unsupported = [], synapse = [], dev = null, showAll = null;
 let sel = null, section = null, view = 'work'; // selected tile, rail section, 'work' or 'compare'
-let btnFailed = {}, btnData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
+let btnFailed = {}, btnData = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
 
 // Full-size ANSI keyboard on Razer's 6 x 22 per-key grid.
 // Each key: [label, matrix column, width, gap before, height], in key units.
@@ -485,16 +529,77 @@ const TKL = [['Esc', 0, 1, 0, 0, 1, 1], ['F1', 0, 3, 2.05, 0, 1, 1], ['F2', 0, 4
 const MINI = [['Esc', 0, 1, 0, 0, 1, 1], ['1', 0, 2, 1, 0, 1, 1], ['2', 0, 3, 2, 0, 1, 1], ['3', 0, 4, 3, 0, 1, 1], ['4', 0, 5, 4, 0, 1, 1], ['5', 0, 6, 5, 0, 1, 1], ['6', 0, 7, 6, 0, 1, 1], ['7', 0, 8, 7, 0, 1, 1], ['8', 0, 9, 8, 0, 1, 1], ['9', 0, 10, 9, 0, 1, 1], ['0', 0, 11, 10, 0, 1, 1], ['-', 0, 12, 11, 0, 1, 1], ['=', 0, 13, 12, 0, 1, 1], ['Backspace', 0, 14, 13, 0, 2, 1], ['Tab', 1, 1, 0, 1, 1.5, 1], ['Q', 1, 2, 1.5, 1, 1, 1], ['W', 1, 3, 2.5, 1, 1, 1], ['E', 1, 4, 3.5, 1, 1, 1], ['R', 1, 5, 4.5, 1, 1, 1], ['T', 1, 6, 5.5, 1, 1, 1], ['Y', 1, 7, 6.5, 1, 1, 1], ['U', 1, 8, 7.5, 1, 1, 1], ['I', 1, 9, 8.5, 1, 1, 1], ['O', 1, 10, 9.5, 1, 1, 1], ['P', 1, 11, 10.5, 1, 1, 1], ['[', 1, 12, 11.5, 1, 1, 1], [']', 1, 13, 12.5, 1, 1, 1], ['\\', 1, 14, 13.5, 1, 1.5, 1], ['Caps', 2, 1, 0, 2, 1.75, 1], ['A', 2, 2, 1.75, 2, 1, 1], ['S', 2, 3, 2.75, 2, 1, 1], ['D', 2, 4, 3.75, 2, 1, 1], ['F', 2, 5, 4.75, 2, 1, 1], ['G', 2, 6, 5.75, 2, 1, 1], ['H', 2, 7, 6.75, 2, 1, 1], ['J', 2, 8, 7.75, 2, 1, 1], ['K', 2, 9, 8.75, 2, 1, 1], ['L', 2, 10, 9.75, 2, 1, 1], [';', 2, 11, 10.75, 2, 1, 1], ["'", 2, 12, 11.75, 2, 1, 1], ['Enter', 2, 14, 12.75, 2, 2.25, 1], ['Shift', 3, 1, 0, 3, 2.25, 1], ['Z', 3, 3, 2.25, 3, 1, 1], ['X', 3, 4, 3.25, 3, 1, 1], ['C', 3, 5, 4.25, 3, 1, 1], ['V', 3, 6, 5.25, 3, 1, 1], ['B', 3, 7, 6.25, 3, 1, 1], ['N', 3, 8, 7.25, 3, 1, 1], ['M', 3, 9, 8.25, 3, 1, 1], [',', 3, 10, 9.25, 3, 1, 1], ['.', 3, 11, 10.25, 3, 1, 1], ['/', 3, 12, 11.25, 3, 1, 1], ['Shift', 3, 14, 12.25, 3, 2.75, 1], ['Ctrl', 4, 1, 0, 4, 1.3, 1], ['Win', 4, 2, 1.3, 4, 1.2, 1], ['Alt', 4, 3, 2.5, 4, 1.3, 1], ['Space', 4, 7, 3.8, 4, 6.2, 1], ['Alt', 4, 11, 10, 4, 1.3, 1], ['Fn', 4, 12, 11.25, 4, 1.25, 1], ['Menu', 4, 13, 12.5, 4, 1.25, 1], ['Ctrl', 4, 14, 13.75, 4, 1.25, 1]];
 const PLACED = { '6x16:laptop': BLADE, '6x18:keyboard': TKL, '5x15:keyboard': MINI };
 // The keys of a per-key device, or null when its layout isn't known (one square per light).
+// The maps above start at column 1; boards whose leftmost key is column 0 (DeathStalker V2, #41)
+// shift every key left, and their tenkeyless grid is one column narrower. Except the wide
+// numpad 0, which stays at column 18 there (#41: it lit before the shift and not after).
+// Boards that differ from the maps, from their owners' light-finder lists.
+const LAYOUT_FIXES = {
+  // Huntsman V3 Pro (#45): numpad . is column 19; column 20 is the volume dial, and the three
+  // media keys share row 0, column 18. Both sit top right.
+  '02A6': keys => {
+    const num = keys.find(k => k.label === 'Num'), star = keys.find(k => k.label === '*');
+    return [...keys.map(k => k.row === 5 && k.label === '.' ? { ...k, col: 19 } : k),
+      { label: 'Media', row: 0, col: 18, x: num.x, y: 0, w: 2, h: 1 },
+      { label: 'Dial', row: 5, col: 20, x: star.x + 1, y: 0, w: 1, h: 1 }];
+  },
+};
 function knownLayout(m, kind) {
-  if (m.rows === 6 && m.cols === 22) return FULLSIZE.flatMap((keys, row) => {
-    let x = 0;
-    return keys.map(([label, col, w = 1, gap = 0, h = 1]) => { x += gap; const k = { label, row, col, x, y: row + (row ? .25 : 0), w, h }; x += w; return k; });
+  const shift = (m.first ?? 1) - 1;
+  if (m.rows === 6 && m.cols === 22) {
+    const out = FULLSIZE.flatMap((keys, row) => {
+      let x = 0;
+      return keys.map(([label, col, w = 1, gap = 0, h = 1]) => {
+        x += gap;
+        const k = { label, row, col: row === 5 && label === '0' ? col : col + shift, x, y: row + (row ? .25 : 0), w, h };
+        x += w; return k;
+      });
+    });
+    const fix = dev && LAYOUT_FIXES[dev.pid];
+    return nameKeys(fix ? fix(out) : out);
+  }
+  const placed = PLACED[m.rows + 'x' + (m.cols - shift) + ':' + kind];
+  return placed ? nameKeys(placed.map(([label, row, col, x, y, w, h]) => ({ label, row, col: col + shift, x, y, w, h }))) : null;
+}
+// Each drawn key's remap name (`secbird key`), from its label and where it sits: the second
+// Shift, Ctrl or Alt in a row is the right one, and keys from x 18.4 on are the numpad.
+const KEY_NAMES = { Esc: 'esc', '`': 'grave', '-': 'minus', '=': 'equal', Backspace: 'backspace', Tab: 'tab', '[': 'lbracket',
+  ']': 'rbracket', '\\': 'backslash', Caps: 'capslock', ';': 'semicolon', "'": 'quote', Enter: 'enter', ',': 'comma', '.': 'period',
+  '/': 'slash', Shift: 'lshift', Ctrl: 'lctrl', Alt: 'lalt', Win: 'lwin', Menu: 'menu', '': 'space', Space: 'space',
+  PrtSc: 'printscreen', ScrLk: 'scrolllock', Pause: 'pause', Ins: 'insert', Home: 'home', PgUp: 'pageup', Del: 'delete',
+  End: 'end', PgDn: 'pagedown', '↑': 'up', '↓': 'down', '←': 'left', '→': 'right', Num: 'numlock' };
+const NUMPAD_NAMES = { '/': 'num-slash', '*': 'num-star', '-': 'num-minus', '+': 'num-plus', Enter: 'num-enter', '.': 'num-period' };
+const RIGHT_NAMES = { lshift: 'rshift', lctrl: 'rctrl', lalt: 'ralt' };
+function nameKeys(keys) {
+  const seen = new Set();
+  return keys.map(k => {
+    let name;
+    if (k.x >= 18.4) name = /^\d$/.test(k.label) ? 'num' + k.label : NUMPAD_NAMES[k.label] || KEY_NAMES[k.label];
+    else if (/^([A-Z0-9]|F\d\d?)$/.test(k.label)) name = k.label.toLowerCase();
+    else name = KEY_NAMES[k.label];
+    if (RIGHT_NAMES[name]) { if (seen.has(k.row + name)) name = RIGHT_NAMES[name]; else seen.add(k.row + name); }
+    return { ...k, name };
   });
-  const placed = PLACED[m.rows + 'x' + m.cols + ':' + kind];
-  return placed ? placed.map(([label, row, col, x, y, w, h]) => ({ label, row, col, x, y, w, h })) : null;
+}
+// The maps above are ANSI. ISO boards (#45) have a key left of Z (matrix column 2) and one left
+// of Enter (column 13), and a tall Enter where ANSI has its backslash.
+const KB_LAYOUTS = [['ansi', 'US (ANSI)'], ['iso', 'UK (ISO)'], ['de', 'German (QWERTZ)']];
+const DE_LABELS = { '`': '^', '-': 'ß', '=': '´', Y: 'Z', Z: 'Y', '[': 'Ü', ']': '+', ';': 'Ö', "'": 'Ä', '/': '-' };
+function kbLayout() { return (dev && remembered('kblayout-' + dev.id)) || 'ansi'; }
+function isoLayout(keys, labels) {
+  const bs = keys.find(k => k.label === '\\'); if (!bs) return keys;
+  const enter = keys.find(k => k.label === 'Enter' && k.row === bs.row + 1 && k.col === bs.col);
+  const shift = keys.find(k => k.label === 'Shift' && k.row === bs.row + 2 && k.x === 0);
+  if (!enter || !shift) return keys;
+  const out = keys.filter(k => k !== bs && k !== enter && k !== shift)
+    .map(k => labels && k.label in labels && k.col < enter.col ? { ...k, label: labels[k.label] } : k); // not the numpad's / and -
+  out.push({ ...enter, label: '#', name: 'iso-hash', col: enter.col - 1, w: 1 },
+    { ...enter, x: enter.x + 1, y: bs.y, w: enter.w - 1, h: enter.y + enter.h - bs.y },
+    { ...shift, w: 1.25 }, { ...shift, label: labels ? '<' : '\\', name: 'iso-backslash', col: shift.col + 1, x: 1.25, w: 1 });
+  return out;
 }
 function layout(m, kind) {
-  const known = knownLayout(m, kind);
+  let known = knownLayout(m, kind);
+  if (known && kbLayout() !== 'ansi') known = isoLayout(known, kbLayout() === 'de' ? DE_LABELS : null);
   if (known) return known;
   const out = []; // unknown layout: one square per matrix cell
   for (let row = 0; row < m.rows; row++) for (let col = 0; col < m.cols; col++) out.push({ label: '', row, col, x: col, y: row, w: 1, h: 1 });
@@ -532,7 +637,7 @@ function live(send, done) {
     (async () => {
       while (next !== undefined) {
         const v = next; next = undefined;
-        try { const r = await send(v); toast(done ? done(r) : 'Saved to ' + dev.active); } catch (e) { toast(e.message, true); }
+        try { const r = await send(v), msg = done ? done(r) : 'Saved to ' + dev.active; if (msg) toast(msg); } catch (e) { toast(e.message, true); }
       }
       busy = false;
     })();
@@ -581,7 +686,52 @@ const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 const label = name => NAMES[name] || name.charAt(0).toUpperCase() + name.slice(1);
 const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
 const hz = v => v + ' Hz';
-const devLabel = d => devices.filter(x => x.pid === d.pid).length > 1 && d.serial ? d.name + ' (' + d.serial.slice(-4) + ')' : d.name;
+// Line drawings for the home cards, picked by kind and shape rather than model, so a new
+// devices.json entry gets one without a drawing of its own. `.f` parts are filled.
+// A keyboard `w` wide from `x`: two rows of keys and a space bar, plus a number pad column.
+const kbd = (x, w, numpad) => {
+  const dot = (cx, cy) => `<circle class="f" cx="${cx.toFixed(1)}" cy="${cy}" r=".8"/>`;
+  const first = x + 2.6, last = x + w - 2.6 - (numpad ? 3.4 : 0), n = Math.round((last - first) / 2.4);
+  let s = `<rect x="${x}" y="6" width="${w}" height="12" rx="2"/>`;
+  for (let i = 0; i <= n; i++) s += dot(first + i * (last - first) / n, 9.3) + dot(first + i * (last - first) / n, 12);
+  s += dot(first, 14.7) + dot(last, 14.7) + `<path d="M${first + 2.6} 14.7H${last - 2.6}"/>`;
+  if (numpad) [9.3, 12, 14.7].forEach(y => { s += dot(x + w - 2.6, y); });
+  return s;
+};
+const ART = {
+  mouse: '<rect x="6.5" y="2.5" width="11" height="19" rx="5.5"/><path d="M12 2.5v6"/>',
+  naga: '<rect x="5.5" y="2.5" width="13" height="19" rx="6"/><path d="M12 2.5v6"/>' +
+    [12, 14.6, 17.2].map(y => `<circle class="f" cx="8.6" cy="${y}" r=".9"/><circle class="f" cx="11" cy="${y}" r=".9"/>`).join(''),
+  'keyboard-full': kbd(1, 22, true),
+  'keyboard-tkl': kbd(2.5, 19, false),
+  'keyboard-compact': kbd(4.5, 15, false),
+  keypad: '<path d="M5 3h9a2 2 0 0 1 2 2v7l3.5 3.5V19a2 2 0 0 1-2 2H7a4 4 0 0 1-4-4V5a2 2 0 0 1 2-2z"/>' +
+    [6.5, 9.5, 12.5].map(y => [6.5, 9.5, 12.5].map(x => `<circle class="f" cx="${x}" cy="${y}" r=".9"/>`).join('')).join(''),
+  headset: '<path d="M4.5 15v-3a7.5 7.5 0 0 1 15 0v3"/><rect x="3" y="14" width="4.5" height="7" rx="1.5"/><rect x="16.5" y="14" width="4.5" height="7" rx="1.5"/>',
+  mousepad: '<path d="M6.5 6.5h14a1 1 0 0 1 1 1.2l-1.8 9.6a1.5 1.5 0 0 1-1.5 1.2h-14a1 1 0 0 1-1-1.2l1.8-9.6a1.5 1.5 0 0 1 1.5-1.2z"/><path d="M6 15.5h7" stroke-dasharray="1.6 1.6"/>',
+  laptop: '<rect x="4.5" y="4.5" width="15" height="10.5" rx="1.5"/><path d="M2 19h20"/>',
+  dongle: '<rect x="8" y="9" width="8" height="12.5" rx="2"/><path d="M10 9V3.5h4V9"/>',
+  dock: '<rect x="8" y="2.5" width="8" height="12.5" rx="4"/><path d="M12 2.5v4"/><path d="M4.5 20.5h15a2.5 2.5 0 0 0-2.5-2.5H7a2.5 2.5 0 0 0-2.5 2.5z"/>',
+  speaker: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><circle cx="12" cy="14.5" r="3.5"/><circle cx="12" cy="7" r="1.2"/>',
+  device: '<rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="12" cy="12" r="3"/>',
+};
+function deviceArt(d) {
+  const n = d.name || '';
+  if (/receiver|dongle/i.test(n)) return 'dongle';
+  // "Naga V3 Pro on Mouse Dock V2 Pro" is the mouse; the dock is only its receiver.
+  if (!/ on Mouse Dock/i.test(n) && /dock|charging pad|base station|bungee/i.test(n)) return 'dock';
+  if (/speaker|nommo|leviathan/i.test(n)) return 'speaker';
+  if (d.kind === 'mouse') return /naga/i.test(n) ? 'naga' : 'mouse';
+  if (d.kind === 'keyboard') {
+    const cols = d.matrix && d.matrix.cols;
+    if (cols > 2) return 'keyboard-' + (cols >= 20 ? 'full' : cols >= 17 ? 'tkl' : 'compact');
+    return 'keyboard-' + (/mini|compact|60|65|75/i.test(n) ? 'compact' : /tenkeyless|tkl/i.test(n) ? 'tkl' : 'full');
+  }
+  return ART[d.kind] ? d.kind : 'device';
+}
+const artTile = d => el('span', { className: 'dtile', innerHTML: `<svg class="dart" viewBox="0 0 24 24" aria-hidden="true">${ART[deviceArt(d)]}</svg>` });
+
+const devLabel = d =>devices.filter(x => x.pid === d.pid).length > 1 && d.serial ? d.name + ' (' + d.serial.slice(-4) + ')' : d.name;
 
 // A device's profiles: the active one is `dev.profile`, the rest come from `profilesData`.
 function adopt(d) {
@@ -714,12 +864,15 @@ function sections() {
   if (dev.stages) sens.push({ key: 'stages', label: 'DPI stages' });
   if (dev.polling) sens.push({ key: 'polling', label: 'Polling rate' });
   if (sens.length) s.push({ id: 'sens', name: 'Sensitivity', rows: sens });
-  if (dev.kind === 'mouse') {
+  if (dev.kind === 'mouse' || isBoard()) {
     const list = btnData[dev.id];
-    s.push({ id: 'buttons', name: 'Buttons', tools: 'layer', loading: !list,
-      rows: (list || []).filter(b => b[btnLayer] != null).map(b => ({ key: 'btn:' + b.name, label: b.label, name: b.name })) });
+    s.push({ id: 'buttons', name: isBoard() ? 'Keys' : 'Buttons', tools: 'layer', loading: !list,
+      rows: [...(list || []).filter(b => b[btnLayer] != null).sort((a, b) => placeRank(a.name) - placeRank(b.name))
+        .map(b => ({ key: 'btn:' + b.name, label: (buttonPlace(b.name) || [b.label])[0], name: b.name })),
+        ...(list && list.length && !isBoard() ? [{ key: 'onboard', label: 'Saved on the mouse' }] : [])] });
   }
   if (dev.macros) s.push({ id: 'macros', name: 'Macros', rows: [{ key: 'macros', label: 'Macros on the device' }] });
+  if (dev.game_mode != null) s.push({ id: 'gaming', name: 'Gaming', rows: [{ key: 'gaming', label: 'Gaming mode' }] });
   const power = [];
   if (dev.sleep) power.push({ key: 'sleep', label: 'Sleep when idle' });
   if (dev.dimming) power.push({ key: 'dimming', label: 'Keyboard when idle' });
@@ -748,8 +901,9 @@ function railSummary(s) {
   if (s.id === 'sens') return [dev.dpi && dev.dpi.x + ' DPI', dev.polling && hz(dev.polling.hz)].filter(Boolean).join(' · ');
   if (s.id === 'buttons') {
     const n = Object.keys(p.buttons || {}).length;
-    return n ? plural(n, 'button') + ' changed' : 'As saved in the mouse';
+    return n ? plural(n, isBoard() ? 'key' : 'button') + ' changed' : 'As saved in the ' + holder();
   }
+  if (s.id === 'gaming') return gamingText(dev.game_mode);
   if (s.id === 'macros') { const m = macroData[dev.id]; return m ? (m.macros.length ? plural(m.macros.length, 'macro') : 'None yet') : 'On the device'; }
   if (s.id === 'power') {
     const sl = dev.sleep;
@@ -812,7 +966,12 @@ function renderTiles(cur) {
   const tools = el('div', { className: 'tools' });
   if (cur.tools === 'layer') {
     if (Object.keys(dev.profile.buttons || {}).length) tools.append(el('button', { className: 'ghost', textContent: 'Restore all',
-      title: 'Every changed button back to what the mouse stores', onclick: restoreAllButtons }));
+      title: `Every changed ${isBoard() ? 'key' : 'button'} back to what the ${holder()} stores`, onclick: restoreAllButtons }));
+    if (isBoard() && remapLayout()) {
+      const pick = el('select', { ariaLabel: 'Keyboard layout', onchange: () => { remember('kblayout-' + dev.id, pick.value); renderWork(true); } });
+      KB_LAYOUTS.forEach(([v, txt]) => pick.append(new Option(txt, v, false, v === kbLayout())));
+      tools.append(pick);
+    }
     const seg = el('span', { className: 'seg', role: 'group', ariaLabel: 'Button layer' });
     [['normal', 'Normal'], ['hypershift', 'HyperShift']].forEach(([v, txt]) => seg.append(el('button', {
       textContent: txt, ariaPressed: btnLayer === v, title: v === 'hypershift' ? 'What each button does while a button set to HyperShift is held' : 'What each button does',
@@ -827,9 +986,11 @@ function renderTiles(cur) {
   if (cur.loading) {
     const g = el('div', { className: 'tgrid' });
     for (let i = 0; i < 8; i++) g.append(el('div', { className: 'skel' }));
-    t.append(g, el('p', { className: 'hint', textContent: 'Reading the buttons from the mouse…' }));
+    t.append(g, el('p', { className: 'hint', textContent: isBoard()
+      ? 'Reading every key from the ' + holder() + '. This takes a few seconds…' : 'Reading the buttons from the mouse…' }));
     return;
   }
+  if (cur.id === 'buttons' && isBoard()) return keyTiles(t, cur);
   // Side plates (Naga) are drawn as keypads, the way they sit on the mouse.
   const plain = cur.rows.filter(r => !/^btn:(grid|hex)-/.test(r.key));
   const grid = cur.rows.filter(r => /^btn:grid-/.test(r.key));
@@ -850,6 +1011,116 @@ function renderTiles(cur) {
     t.append(k);
   }
 }
+
+const BOARDS = ['keyboard', 'keypad', 'laptop'];
+const isBoard = () => BOARDS.includes(dev.kind);
+const holder = () => dev.kind === 'mouse' ? 'mouse' : (KINDS[dev.kind] || 'device').toLowerCase();
+
+// The keyboard drawn for remapping. Key ids are key positions, not lights, so a board whose
+// lights aren't mapped still gets a standard drawing: full size if it has a numpad, else
+// tenkeyless. Keypads get tiles.
+// The size comes from the light grid: 5 rows is 60% (15 columns) or 65%, 6 rows of 16 or 17
+// columns is 75%. With no grid, a numpad key in the key list means full size.
+function remapLayout() {
+  if (dev.kind === 'keypad') return null;
+  const m = dev.matrix;
+  if (m && knownLayout(m, dev.kind)) return layout(m, dev.kind);
+  const cols = m && m.cols - ((m.first ?? 1) - 1);
+  if (m && m.rows <= 5) return cols <= 15 ? layout({ rows: 5, cols: 15 }, 'keyboard') : compactBoard(false);
+  if (m && cols < 18) return compactBoard(true);
+  const numpad = m ? cols >= 20 : (btnData[dev.id] || []).some(b => b.name === 'key-num5');
+  return layout(numpad ? { rows: 6, cols: 22 } : { rows: 6, cols: 18 }, 'keyboard');
+}
+// 75% (fRow) and 65% boards: the full-size main block, a column of navigation keys, and the
+// arrows tucked in at the bottom right. Drawn for remapping only; the columns aren't lights.
+function compactBoard(fRow) {
+  const nav = fRow ? ['Del', 'Home', 'PgUp', 'PgDn'] : [null, 'Del', 'PgUp', 'PgDn'];
+  const rows = FULLSIZE.map((keys, row) => {
+    let main = keys.filter(k => k[1] <= 14);
+    if (row === 1 && !fRow) main = main.map(k => k[0] === '`' ? ['Esc', 1] : k);
+    if (row === 4) main = main.map(k => k[1] === 14 ? ['Shift', 14, 1.75] : k);
+    if (row === 5) main = main.filter(k => k[0] !== 'Menu').map(k => k[1] > 7 ? [k[0], k[1], 1] : k);
+    const right = row === 4 ? [['↑', 16, 1, .25], ['End', 17]] : row === 5 ? [['←', 15, 1, .25], ['↓', 16], ['→', 17]] : [[nav[row], 15, 1, .25]];
+    return [...main, ...right];
+  }).slice(fRow ? 0 : 1);
+  return isoKeys(nameKeys(rows.flatMap((keys, row) => {
+    let x = 0;
+    return keys.map(([label, col, w = 1, gap = 0, h = 1]) => {
+      x += gap;
+      const k = { label, row, col, x, y: row + (fRow && row ? .25 : 0), w, h };
+      x += w; return k;
+    });
+  })));
+}
+function isoKeys(keys) { return kbLayout() === 'ansi' ? keys : isoLayout(keys, kbLayout() === 'de' ? DE_LABELS : null); }
+
+// Keys section: click a key on the drawing. Keys the drawing doesn't have (Japanese keys,
+// keypads) are tiles below it.
+function keyTiles(t, cur) {
+  if (!cur.rows.length) {
+    t.append(el('p', { className: 'hint', textContent: btnFailed[dev.id] ? 'Couldn’t read the keys. Unplug and replug it, then open this again.'
+      : btnLayer === 'hypershift' ? 'This ' + holder() + ' has no HyperShift layer to change.'
+      : 'Key remapping isn’t supported on this ' + holder() + ' yet. It doesn’t take Razer’s remap commands, so it needs a remap done by Secretarybird itself, which is planned after 0.5.' }));
+    return;
+  }
+  const rows = new Map(cur.rows.map(r => [r.key, r])), drawn = new Set(), keys = remapLayout();
+  if (keys) {
+    const w = Math.max(...keys.map(k => k.x + k.w)), h = Math.max(...keys.map(k => k.y + k.h));
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = 'remapkb'; svg.setAttribute('viewBox', `-0.05 -0.05 ${w + 0.1} ${h + 0.1}`);
+    svg.setAttribute('aria-label', 'Keyboard: pick a key to change what it does');
+    svg.innerHTML = keys.map(k => {
+      const r = k.name && rows.get('btn:key-' + k.name);
+      const box = `<rect x="${k.x + .05}" y="${k.y + .05}" width="${k.w - .1}" height="${k.h - .1}" rx=".12"/>`;
+      if (!r) return `<g class="none">${box}<text x="${k.x + k.w / 2}" y="${k.y + k.h / 2}">${esc(k.label)}</text></g>`;
+      drawn.add(r.key);
+      const [html, changed] = cellView(r.key, dev.active);
+      const what = el('span', { innerHTML: html }).textContent.replace(/^Key /, '');
+      const short = what.length > 8 ? what.slice(0, 7) + '…' : what;
+      return `<g data-row="${esc(r.key)}" class="${changed ? 'changed' : ''}" tabindex="0" role="button" aria-pressed="${sel === r.key}"` +
+        ` aria-label="${esc(r.label + ': ' + what + (changed ? ' (changed)' : ''))}"><title>${esc(r.label + ': ' + what)}</title>${box}` +
+        (changed ? `<text x="${k.x + k.w / 2}" y="${k.y + k.h * .34}">${esc(k.label)}</text><text class="act" x="${k.x + k.w / 2}" y="${k.y + k.h * .7}">${esc(short)}</text>`
+          : `<text x="${k.x + k.w / 2}" y="${k.y + k.h / 2}">${esc(k.label)}</text>`) + '</g>';
+    }).join('');
+    const pick = e => { const g = e.target.closest && e.target.closest('g[data-row]'); if (g) select(g.dataset.row); };
+    svg.onclick = pick;
+    svg.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(e); } };
+    t.append(el('div', { className: 'kbwrap' }, svg));
+    if (!(dev.matrix && knownLayout(dev.matrix, dev.kind))) t.append(el('p', { className: 'hint', textContent:
+      'Drawn as a standard keyboard: yours may not have every key shown. Greyed keys can’t be changed.' }));
+  }
+  const rest = cur.rows.filter(r => !drawn.has(r.key));
+  if (!rest.length) return;
+  const g = el('div', { className: 'tgrid' });
+  rest.forEach(r => g.append(tile(r)));
+  if (!keys) return t.append(g);
+  // Keys the drawing doesn't have (ISO, Japanese, a smaller board's numpad): folded away unless
+  // one is in use.
+  const open = rest.some(r => r.key === sel || cellView(r.key, dev.active)[1]);
+  t.append(el('details', { className: 'morekeys', open }, el('summary', { className: 'subhead', textContent: `${plural(rest.length, 'more key')}, not on the drawing` }), g));
+}
+
+// Buttons named by where they are on the mouse, for models whose layout was checked on the
+// real thing (#71, thanks lukethehawk): [name, where to find it]. Other devices keep the
+// generic names. Tiles follow this order.
+const BASILISK_V4_HS = {
+  left: ['Left button', 'The main button under your index finger.'],
+  right: ['Right button', 'The main button under your middle finger.'],
+  'scroll-up': ['Wheel, roll up', 'Rolling the scroll wheel away from you.'],
+  wheel: ['Wheel, press', 'Pressing down on the scroll wheel.'],
+  'scroll-down': ['Wheel, roll down', 'Rolling the scroll wheel toward you.'],
+  'tilt-left': ['Wheel, tilt left', 'Pushing the scroll wheel to the left.'],
+  'tilt-right': ['Wheel, tilt right', 'Pushing the scroll wheel to the right.'],
+  hypershift: ['Side trigger (HyperShift)', 'The trigger at the front of the thumb side, below the left button.'],
+  'side-extra': ['Side, front (extra button)', 'The front one of the three buttons on the thumb side.'],
+  'side-forward': ['Side, middle (Mouse 5)', 'The middle one of the three buttons on the thumb side. Forward from the factory.'],
+  'side-back': ['Side, rear (Mouse 4)', 'The rear one of the three buttons on the thumb side, nearest your palm. Back from the factory.'],
+  profile: ['Underside (profile button)', 'The button on the bottom of the mouse.'],
+};
+const BUTTON_PLACES = { '00EA': BASILISK_V4_HS, '00EB': BASILISK_V4_HS };
+const buttonPlaces = () => (dev && dev.kind === 'mouse' && BUTTON_PLACES[dev.pid]) || null;
+const buttonPlace = name => (buttonPlaces() || {})[name] || null;
+const placeRank = name => { const order = Object.keys(buttonPlaces() || {}), i = order.indexOf(name); return i < 0 ? order.length : i; };
 
 function tile(r, short) {
   const [html, changed] = cellView(r.key, dev.active);
@@ -875,6 +1146,7 @@ function select(key) {
 }
 
 function renderPanel(cur) {
+  stopFinding();
   const p = $('panel');
   p.innerHTML = '';
   const r = sel && cur.rows.find(x => x.key === sel);
@@ -947,6 +1219,7 @@ function refreshCell(row) {
     const [html, changed] = cellView(row, dev.active);
     t.querySelector('.tv').innerHTML = html; t.classList.toggle('changed', !!changed);
   }
+  if (document.querySelector(`#remapkb g[data-row="${CSS.escape(row)}"]`)) renderTiles(sections().find(s => s.id === section));
   renderRail(sections());
 }
 
@@ -966,7 +1239,13 @@ function renderCompare() {
   secs.forEach(s => {
     const body = el('tbody');
     body.append(el('tr', { className: 'grp' }, el('th', { colSpan: span, scope: 'rowgroup', textContent: s.name + (s.id === 'buttons' && btnLayer === 'hypershift' ? ' · HyperShift' : '') })));
-    const rowsOf = s.loading ? [{ key: 'loading', label: 'Reading buttons…' }] : s.rows.filter(r => r.key !== 'lighting-control');
+    let rowsOf = s.loading ? [{ key: 'loading', label: 'Reading buttons…' }] : s.rows.filter(r => r.key !== 'lighting-control');
+    // A keyboard has a hundred keys: only those some profile changes.
+    if (s.id === 'buttons' && isBoard() && !s.loading) {
+      const skey = r => btnLayer === 'normal' ? r.name : r.name + '/hypershift';
+      rowsOf = rowsOf.filter(r => names.some(n => (prof(n).buttons || {})[skey(r)]));
+      if (!rowsOf.length) rowsOf = [{ key: 'loading', label: 'No profile changes a key' }];
+    }
     rowsOf.forEach(r => {
       const tr = el('tr');
       tr.append(el('th', { scope: 'row', textContent: r.label }));
@@ -995,7 +1274,8 @@ function cellValue(key, name) {
   if (key === 'stages') { const st = stagesOf(name); return st ? st.active + ':' + st.list.join(' ') : ''; }
   if (key === 'sleep') { const sl = sleepOf(name); return sl ? sl.auto + ':' + sl.minutes : ''; }
   if (key === 'dimming') return dimmingOf(name) || '';
-  if (key === 'macros') return 'shared'; // the device's, the same in every profile
+  if (key === 'gaming') return gamingOf(name) || '';
+  if (key === 'macros' || key === 'onboard') return 'shared'; // the device's, the same in every profile
   if (key.startsWith('btn:')) {
     const b = (btnData[dev.id] || []).find(x => x.name === key.slice(4)); if (!b) return '';
     const skey = btnLayer === 'normal' ? b.name : b.name + '/hypershift';
@@ -1010,6 +1290,12 @@ const differs = (key, name) => name !== dev.active && cellValue(key, name) !== c
 function cellView(key, name) {
   const p = prof(name), active = name === dev.active;
   if (key === 'lighting-control') return [dev.lighting_control ? 'Secretarybird' : '<span class="unset">Not controlled</span>'];
+  if (key === 'onboard') {
+    const o = onboardData[dev.id];
+    if (!o) return ['<span class="unset">Not saved</span>'];
+    if (o.profile !== name) return ['<span class="unset">Not this profile</span>'];
+    return [`Slot <span class="num">${o.slot}</span>` + (o.changed ? ' · <span class="unset">changed since</span>' : '')];
+  }
   if (key.startsWith('zone:')) {
     const z = zoneOf(p, key.slice(5));
     if (p.keys && p.keys.length && dev.matrix) return ['<span class="unset">Per-key colors</span>'];
@@ -1042,6 +1328,10 @@ function cellView(key, name) {
   if (key === 'dimming') {
     const d = dimmingOf(name);
     return [d ? DIMMING[d] : '<span class="unset">Not set</span>'];
+  }
+  if (key === 'gaming') {
+    const g = gamingOf(name);
+    return [g ? gamingText(g) : '<span class="unset">Not set</span>'];
   }
   if (key === 'sleep') {
     const sl = sleepOf(name);
@@ -1117,6 +1407,8 @@ function buildEditor(host, r) {
   else if (r.key === 'stages') stagesEditor(box);
   else if (r.key === 'sleep') sleepEditor(box);
   else if (r.key === 'dimming') dimmingEditor(box);
+  else if (r.key === 'gaming') gamingEditor(box);
+  else if (r.key === 'onboard') onboardEditor(box);
   else if (r.key === 'macros') macrosEditor(box);
   else if (r.key === 'apps') appsEditor(box);
   else if (r.key === 'device') deviceEditor(box);
@@ -1227,7 +1519,7 @@ function copyGroup(name) {
 
 // Built-in effects the device runs by itself. Colors come from the zone's color above.
 const EFFECTS = [['static', 'Static color'], ['spectrum', 'Spectrum cycling'], ['wave', 'Wave'],
-  ['breathing', 'Breathing'], ['reactive', 'Reactive'], ['starlight', 'Starlight']];
+  ['breathing', 'Breathing'], ['reactive', 'Reactive'], ['starlight', 'Starlight'], ['battery', 'Mouse battery']];
 function effectLabel(e) {
   const [kind, rest = ''] = e.split(':'), [arg, n] = rest.split('@');
   const name = (EFFECTS.find(x => x[0] === kind) || [kind, kind])[1];
@@ -1238,9 +1530,16 @@ function effectLabel(e) {
 function effectGroup(name) {
   const z = zoneOf(dev.profile, name), cur = z.effect || '';
   const [kind0, rest = ''] = cur.split(':'), [arg0, n0] = rest.split('@');
-  const kind = cur ? kind0 : 'static';
+  const unsupported = dev.unsupported_effects || [];
+  // Old profiles may contain an effect the device was later shown not to run.
+  // Present Static as the safe default; selecting an effect saves the replacement.
+  const kind = cur && !unsupported.includes(kind0) ? kind0 : 'static';
   const sel = el('select', { id: 'zoneFx', ariaLabel: 'Effect' });
-  EFFECTS.forEach(([v, t]) => sel.append(new Option(t, v, false, v === kind)));
+  // Battery is offered for a dock's light only (#39), where Synapse has its battery-level
+  // lighting. The dock takes reactive and starlight but shows nothing, so those are left out.
+  const dockOnly = ['battery'], notOnDock = ['reactive', 'starlight'];
+  EFFECTS.filter(([v]) => !unsupported.includes(v) && (name === 'dock' ? !notOnDock.includes(v) : !dockOnly.includes(v)))
+    .forEach(([v, t]) => sel.append(new Option(t, v, false, v === kind)));
   const dir = el('select', { ariaLabel: 'Wave direction' });
   [['right', 'Right →'], ['left', '← Left']].forEach(([v, t]) => dir.append(new Option(t, v, false, kind === 'wave' && v === (arg0 || 'right'))));
   const speed = el('input', { type: 'range', min: 1, max: 5, step: 1, value: kind === 'wave' ? (n0 || 3) : 3, ariaLabel: 'Wave speed' });
@@ -1248,8 +1547,15 @@ function effectGroup(name) {
   [['1', 'Short'], ['2', 'Medium'], ['3', 'Long']].forEach(([v, t]) => dur.append(new Option(t, v, false, v === (n0 || '2'))));
   const rnd = el('input', { type: 'checkbox', id: 'fxRandom', checked: arg0 === 'random' });
   const rndLabel = el('label', { htmlFor: 'fxRandom', textContent: 'Random colors' });
+  const note = el('p', { className: 'note' });
   const show = () => {
     const k = sel.value;
+    const savedKind = (zoneOf(dev.profile, name).effect || '').split(':')[0];
+    note.textContent = savedKind && unsupported.includes(savedKind)
+      ? 'The saved ' + savedKind + ' effect is not supported on this device. Choose an available effect to replace it.'
+      : k === 'battery'
+      ? 'Green when the mouse is charged, through yellow and orange to red when it’s nearly empty. Secretarybird updates it every 5 minutes.'
+      : 'Runs on the device itself. Not every device has every effect; it says so if not.';
     dir.hidden = speed.hidden = k !== 'wave';
     dur.hidden = !(k === 'reactive' || k === 'starlight');
     rnd.hidden = rndLabel.hidden = !(k === 'breathing' || k === 'starlight');
@@ -1258,7 +1564,7 @@ function effectGroup(name) {
     show();
     const k = sel.value, color = zoneOf(dev.profile, name).color || '00FF00';
     if (k === 'static') return setColor(color, name);
-    const text = k === 'spectrum' ? 'spectrum'
+    const text = k === 'spectrum' || k === 'battery' ? k
       : k === 'wave' ? `wave:${dir.value}@${speed.value}`
       : k === 'reactive' ? `reactive:${color}@${dur.value}`
       : k === 'breathing' ? `breathing:${rnd.checked ? 'random' : color}`
@@ -1266,14 +1572,19 @@ function effectGroup(name) {
     try {
       await api('/api/effect', { zone: name, effect: text });
       record(name, { effect: text, off: false });
+      show();
       toast(effectLabel(text) + ' · saved to ' + dev.active);
-    } catch (e) { toast(e.message, true); sel.value = (zoneOf(dev.profile, name).effect || 'static').split(':')[0]; show(); }
+    } catch (e) {
+      toast(e.message, true);
+      const previous = (zoneOf(dev.profile, name).effect || 'static').split(':')[0];
+      sel.value = unsupported.includes(previous) ? 'static' : previous;
+      show();
+    }
   };
   [sel, dir, speed, dur, rnd].forEach(c => c.onchange = send);
   show();
   return el('div', { className: 'edgroup' }, el('h3', { textContent: 'Effect' }),
-    el('div', { className: 'row' }, sel, dir, speed, dur, rnd, rndLabel),
-    el('p', { className: 'note', textContent: 'Runs on the device itself. Not every device has every effect; it says so if not.' }));
+    el('div', { className: 'row' }, sel, dir, speed, dur, rnd, rndLabel), note);
 }
 
 function keysEditor(box) {
@@ -1284,13 +1595,97 @@ function keysEditor(box) {
     el('div', { className: 'edgroup' }, el('h3', { textContent: 'Brush' }), presets, custom),
     el('div', { className: 'edgroup' }, el('h3', { textContent: 'Quick' }),
       el('button', { className: 'ghost', textContent: 'Fill all keys', onclick: () => setKeys(Array(keyCount()).fill(brush)) }),
-      el('button', { className: 'ghost', textContent: 'Back to whole keyboard', onclick: () => { const c = dev.leds[0] && (zoneOf(dev.profile, dev.leds[0].name).color || brush); if (c) setColor(c, dev.leds[0].name); } })),
+      el('button', { className: 'ghost', textContent: 'Back to whole keyboard', onclick: () => { const c = dev.leds[0] && (zoneOf(dev.profile, dev.leds[0].name).color || brush); if (c) setColor(c, dev.leds[0].name); } }),
+      el('button', { className: 'ghost', textContent: 'Find which light is which key…', onclick: () => { box.innerHTML = ''; findLights(box); } })),
+    knownLayout(dev.matrix, dev.kind) ? el('div', { className: 'edgroup' }, el('h3', { textContent: 'Layout' }), (() => {
+      const pick = el('select', { ariaLabel: 'Keyboard layout', onchange: () => { remember('kblayout-' + dev.id, pick.value); renderKb(svg); } });
+      KB_LAYOUTS.forEach(([v, t]) => pick.append(new Option(t, v, false, v === kbLayout())));
+      return pick;
+    })()) : null,
     el('p', { className: 'note', textContent: knownLayout(dev.matrix, dev.kind)
       ? 'Pick a brush color, then click or drag across keys to paint them.'
       : 'This keyboard’s key layout isn’t known yet, so each square is one of its lights, in rows from the top left. Paint one to see which key lights up.' }),
     el('div', { className: 'kbwrap' }, svg));
   renderKb(svg);
 }
+
+// Lights one cell of the board's grid at a time; the user types the key that lit up, and the
+// list goes into a GitHub issue. Maps boards whose layout is wrong or unknown (#45, #27, #41)
+// without guessing. Nothing is saved on the device; leaving puts the profile's lighting back.
+let finding = null;
+function findLights(box) {
+  const { rows, cols } = dev.matrix, mem = 'lightmap-' + dev.id;
+  let names = {};
+  try { names = JSON.parse(remembered(mem) || '{}'); } catch { }
+  let at = 0;
+  const known = knownLayout(dev.matrix, dev.kind) ? layout(dev.matrix, dev.kind) : [];
+  const guess = Object.fromEntries(known.filter(k => k.label).map(k => [k.row * cols + k.col, k.label]));
+  const show = live(i => api('/api/find-light', { light: [Math.floor(i / cols), i % cols] }), () => null);
+  finding = dev.id;
+  const where = el('p', { className: 'hint', ariaLive: 'polite' });
+  const input = el('input', { type: 'text', placeholder: 'e.g. Num ,  or  Volume dial', ariaLabel: 'Key that lit up' });
+  const grid = el('div', { className: 'lightgrid', style: `grid-template-columns: repeat(${cols}, minmax(0, 1fr))` });
+  const cells = [];
+  for (let i = 0; i < rows * cols; i++) {
+    const b = el('button', { title: `Row ${Math.floor(i / cols) + 1}, light ${i % cols + 1}`, onclick: () => go(i) });
+    cells.push(b); grid.append(b);
+  }
+  const keep = () => {
+    const v = input.value.trim();
+    if (v) names[at] = v; else delete names[at];
+    remember(mem, JSON.stringify(names));
+  };
+  const draw = () => cells.forEach((b, i) => {
+    const n = names[i];
+    b.textContent = n === '-' ? '–' : n || '';
+    b.className = (i === at ? 'at ' : '') + (n === '-' ? 'none' : n ? 'named' : '');
+  });
+  const go = i => {
+    keep();
+    at = (i + rows * cols) % (rows * cols);
+    input.value = names[at] || '';
+    where.textContent = `Row ${Math.floor(at / cols) + 1} of ${rows}, light ${at % cols + 1} of ${cols} is lit. Which key is it?` +
+      (guess[at] ? ` The editor has it as “${guess[at]}”.` : '');
+    draw(); show(at); input.focus();
+  };
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); go(at + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); go(at - cols); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); go(at + cols); }
+  };
+  const copy = async () => {
+    keep();
+    const done = Object.keys(names).map(Number).sort((a, b) => a - b);
+    const lines = done.map(i => `${Math.floor(i / cols) + 1},${i % cols + 1}: ${names[i] === '-' ? '(nothing)' : names[i]}`);
+    const text = `Light map for ${dev.name} (${dev.pid}), ${rows} x ${cols} grid, row,light: key\n` + lines.join('\n');
+    try { await navigator.clipboard.writeText(text); toast(`Copied ${done.length} of ${rows * cols}. Paste it into your GitHub issue`); }
+    catch (e) { toast(e.message, true); }
+  };
+  box.append(
+    el('div', { className: 'edgroup' }, el('h3', { textContent: 'Find which light is which key' }),
+      el('p', { className: 'note', textContent: 'One light on your keyboard is on at a time. Type the key it is under and press Enter for the next one. Keys that stay dark: press Nothing lit. Click any square to jump to it. Your answers are kept if you stop halfway.' }),
+      where,
+      el('div', { className: 'row finder' }, input,
+        el('button', { className: 'ghost', textContent: 'Nothing lit', onclick: () => { input.value = '-'; go(at + 1); } }),
+        el('button', { className: 'ghost', innerHTML: icon('left'), ariaLabel: 'Previous light', title: 'Previous', onclick: () => go(at - 1) }),
+        el('button', { className: 'ghost', innerHTML: icon('right'), ariaLabel: 'Next light', title: 'Next', onclick: () => go(at + 1) })),
+      el('div', { className: 'row' },
+        el('button', { textContent: 'Copy the list', onclick: copy }),
+        el('button', { className: 'ghost', textContent: 'Done', onclick: () => { keep(); stopFinding(); box.innerHTML = ''; keysEditor(box); } }))),
+    el('div', { className: 'kbwrap' }, grid));
+  go(0);
+}
+// Put the profile's lighting back after finding lights (also when the page is closed).
+function stopFinding(closing) {
+  if (!finding) return;
+  const id = finding; finding = null;
+  if (closing) {
+    fetch('/api/find-light', { method: 'POST', keepalive: true, headers: { 'X-Secbird-Token': T, 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    return;
+  }
+  api('/api/find-light', { id }).catch(e => toast(e.message, true));
+}
+window.addEventListener('pagehide', () => stopFinding(true));
 
 function dpiEditor(box) {
   const d = dev.dpi, step = Math.max(d.step || 50, 50);
@@ -1444,6 +1839,61 @@ function dimmingEditor(box) {
     el('p', { className: 'note', textContent: 'New and not yet confirmed on a laptop. If it goes dark anyway with Stays lit, please tell us.' }));
 }
 
+// Save to mouse: the profile's button remaps written into the mouse's on-board slot, so they
+// work without Secretarybird. Remaps are live only until then. Put back undoes it.
+function onboardEditor(box) {
+  const o = onboardData[dev.id], n = Object.keys(dev.profile.buttons || {}).length;
+  const status = !o ? 'Your button remaps work while Secretarybird is running. Saved on the mouse, they also work on another PC, on Linux or macOS, and before Secretarybird starts.'
+    : o.profile !== dev.active ? `${o.profile} is saved in on-board slot ${o.slot}. Saving ${dev.active} replaces it.`
+    : o.changed ? `${o.profile} was saved in on-board slot ${o.slot} and has changed since. Save again to update the mouse.`
+    : `${o.profile} is saved in on-board slot ${o.slot} (${plural(o.count, 'remapped button')}). It works without Secretarybird.`;
+  const done = (r, msg) => { btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; sel = 'onboard'; renderWork(); toast(msg); };
+  const save = el('button', { className: 'ghost', textContent: o && o.profile === dev.active ? 'Save again' : 'Save ' + dev.active + ' to the mouse',
+    onclick: async e => {
+      if (!o && !confirm(`Write ${dev.active}'s button remaps into the mouse's memory? What it holds now is kept, and Put back restores it.`)) return;
+      e.target.disabled = true;
+      try { done(await api('/api/save-to-mouse', {}), dev.active + ' saved on the mouse'); }
+      catch (err) { toast(err.message, true); e.target.disabled = false; }
+    } });
+  const putBack = o && el('button', { className: 'ghost', textContent: 'Put back what the mouse had', onclick: async e => {
+    e.target.disabled = true;
+    try { done(await api('/api/put-back', {}), 'The mouse has its own settings back. Your remaps still work while Secretarybird runs.'); }
+    catch (err) { toast(err.message, true); e.target.disabled = false; }
+  } });
+  box.append(el('div', { className: 'edgroup' }, el('p', { textContent: status }),
+      el('div', { className: 'row' }, save, putBack)),
+    el('p', { className: 'note', textContent: n ? 'Lighting, DPI and the sleep timer are on the mouse already; this saves the button remaps.' : 'This profile remaps no buttons, so saving it puts back anything saved before.' }),
+    el('p', { className: 'note', textContent: 'The mouse’s memory is only written when you click here, never when profiles switch.' }));
+}
+
+// Gaming mode (keyboards and keypads): the keys it blocks, as `off` or like `win,alt-tab`.
+const GAMING_KEYS = [['win', 'Windows key'], ['alt-tab', 'Alt+Tab'], ['alt-f4', 'Alt+F4']];
+function gamingOf(name) { return name === dev.active && dev.game_mode ? dev.game_mode : prof(name).game_mode; }
+function gamingKeys(g) { const keys = (g || '').split(','); return GAMING_KEYS.filter(([k]) => keys.includes(k)).map(([, label]) => label); }
+function gamingText(g) { const on = gamingKeys(g); return on.length ? 'Blocks ' + on.join(', ') : 'Off'; }
+function gamingEditor(box) {
+  const rows = GAMING_KEYS.map(([k, label]) => {
+    const input = el('input', { type: 'checkbox', className: 'switch', id: 'gm-' + k,
+      checked: (dev.game_mode || '').split(',').includes(k), onchange: async e => {
+        const t = e.target, keys = (dev.game_mode || '').split(',');
+        const want = GAMING_KEYS.map(([g]) => g).filter(g => g === k ? t.checked : keys.includes(g)).join(',') || 'off';
+        t.disabled = true;
+        try {
+          const r = await api('/api/gaming', { game_mode: want });
+          dev.game_mode = r.game_mode; dev.profile.game_mode = want;
+          refreshCell('gaming');
+          const on = gamingKeys(dev.game_mode);
+          toast((on.length ? 'Gaming mode blocks ' + on.join(', ') : 'Gaming mode off') + ' · saved to ' + dev.active);
+        } catch (err) { t.checked = !t.checked; toast(err.message, true); }
+        t.disabled = false;
+      } });
+    return el('div', { className: 'row' }, input, el('label', { htmlFor: 'gm-' + k, textContent: 'Block ' + label }));
+  });
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Keys blocked so a game isn’t left by accident' }), ...rows),
+    el('p', { className: 'note', textContent: 'Saved to this profile: tie the profile to a game (Profile → Switches with) and gaming mode comes on while you play.' }),
+    el('p', { className: 'note', textContent: 'New and not yet confirmed on a keyboard. If a blocked key still works, please tell us.' }));
+}
+
 // Asks Razer's public product page whether newer firmware is out. Never installs anything.
 const fwResult = {};
 function firmwareCheck() {
@@ -1540,31 +1990,38 @@ function actionLabel(a) {
 }
 
 async function loadButtons(d, force) {
-  if (d.kind !== 'mouse' || (!force && btnData[d.id] !== undefined)) return;
+  if ((d.kind !== 'mouse' && !BOARDS.includes(d.kind)) || (!force && btnData[d.id] !== undefined)) return;
   btnData[d.id] = null; // loading
   if (dev && dev.id === d.id && !showAll) renderSheet();
-  try { btnData[d.id] = (await api('/api/buttons', { id: d.id })).buttons; delete btnFailed[d.id]; } catch { btnData[d.id] = []; btnFailed[d.id] = true; }
+  try {
+    const r = await api('/api/buttons', { id: d.id });
+    btnData[d.id] = r.buttons; onboardData[d.id] = r.onboard; delete btnFailed[d.id];
+  } catch { btnData[d.id] = []; btnFailed[d.id] = true; }
   if (dev && dev.id === d.id && !showAll) renderSheet();
 }
 
 function buttonEditor(box, name) {
   const b = (btnData[dev.id] || []).find(x => x.name === name); if (!b) return;
   const action = b[btnLayer], [choice, keys, n] = splitAction(action);
-  const sel = el('select', { ariaLabel: b.label + ' action', id: 'btnSel' });
+  const place = buttonPlace(name), label = place ? place[0] : b.label;
+  const sel = el('select', { ariaLabel: label + ' action', id: 'btnSel' });
   let found = false;
   BTN_CHOICES.forEach(([group, opts]) => {
+    if (isBoard() && group === 'Sensitivity') return; // a keyboard has no DPI
+    if (group === 'Macro' && !dev.macros) return; // no macro memory, so nothing to play (#67)
     const g = el('optgroup', { label: group });
-    opts.forEach(([v, t]) => { g.append(new Option(t, v, false, v === choice)); found ||= v === choice; });
+    opts.filter(([v]) => !(isBoard() && v === 'scroll-mode:1'))
+      .forEach(([v, t]) => { g.append(new Option(t, v, false, v === choice)); found ||= v === choice; });
     sel.append(g);
   });
   if (!found) sel.prepend(new Option(actionLabel(action) + ' (as saved)', action, false, true)); // only Synapse sets these
-  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: 'Press keys…', ariaLabel: 'Key for ' + b.label });
+  const keyIn = el('input', { type: 'text', className: 'combo', readOnly: true, value: keys ? combo(keys) : '', placeholder: 'Press keys…', ariaLabel: 'Key for ' + label });
   keyIn.dataset.keys = keys;
   const numIn = el('input', { type: 'number', className: 'num', value: n });
   const numLabel = el('span', { className: 'val' });
   // Which macro, and how it plays: once, N times, while held, toggle.
   const macros = (macroData[dev.id] && macroData[dev.id].macros) || [];
-  const macroSel = el('select', { ariaLabel: 'Macro for ' + b.label });
+  const macroSel = el('select', { ariaLabel: 'Macro for ' + label });
   macros.forEach(mc => macroSel.append(new Option(mc.name, mc.id, false, choice === 'macro' && String(mc.id) === keys)));
   const playSel = el('select', { ariaLabel: 'How the macro plays' });
   [['1', 'Once'], ['times', 'Several times'], ['hold', 'While held'], ['toggle', 'Toggle on / off']].forEach(([v, t]) =>
@@ -1583,7 +2040,7 @@ function buttonEditor(box, name) {
   const setKeys = keys => {
     keyIn.dataset.keys = keys; keyIn.value = combo(keys);
     const parts = keys.split('+');
-    modBox.querySelectorAll('button').forEach(t => t.ariaPressed = parts.includes(t.dataset.m));
+    modBox.querySelectorAll('button[data-m]').forEach(t => t.ariaPressed = parts.includes(t.dataset.m));
   };
   ['ctrl', 'shift', 'alt', 'win'].forEach(m => modBox.append(el('button', { textContent: keyLabel(m), ariaPressed: false, dataset: { m },
     title: 'Add or remove ' + keyLabel(m) + '. For shortcuts Windows keeps for itself, like Win+D: press the key, then click this.',
@@ -1594,6 +2051,13 @@ function buttonEditor(box, name) {
       const key = parts.find(p => !MODIFIER_ORDER.includes(p));
       setKeys([...MODIFIER_ORDER.filter(x => on.has(x)), key].filter(Boolean).join('+')); send(); keyIn.focus();
     } })));
+  // Tab moves focus out of the box, and Windows keeps Alt+Tab, so Tab gets its own button:
+  // click it, then a modifier, for Alt+Tab or Ctrl+Tab (#51).
+  modBox.append(el('button', { textContent: 'Tab', title: 'Use Tab as the key. For Alt+Tab, click this, then Alt.',
+    onclick: () => {
+      const mods = (keyIn.dataset.keys || '').split('+').filter(p => MODIFIER_ORDER.includes(p));
+      setKeys([...mods, 'tab'].join('+')); send(); keyIn.focus();
+    } }));
   if (keys) setKeys(keys);
   let lone = null;
   keyIn.onkeydown = e => {
@@ -1621,7 +2085,8 @@ function buttonEditor(box, name) {
   sel.onchange = () => {
     extras();
     if (sel.value === 'key' || sel.value === 'turbo-key') { setKeys(''); keyIn.focus(); return toast('Now press the key or shortcut'); }
-    if (sel.value === 'macro' && !macros.length) return toast('Make a macro first, in the Macros section', true);
+    if (sel.value === 'macro' && macroData[dev.id] === null) return toast('Reading the macros from the device…');
+    if (sel.value === 'macro' && !macros.length) { showSection('macros'); return toast('Make a macro first, then pick it here'); }
     send();
   };
   numIn.onchange = () => { numIn.dataset.touched = '1'; send(); };
@@ -1629,11 +2094,12 @@ function buttonEditor(box, name) {
   playSel.onchange = () => { extras(); send(); };
   extras();
   const saved = b.saved && b.saved[btnLayer];
+  if (place) box.append(el('p', { className: 'note', textContent: place[1] }));
   box.append(el('div', { className: 'edgroup' },
     el('h3', { textContent: 'What it does' + (btnLayer === 'hypershift' ? ' while HyperShift is held' : '') }),
     el('div', { className: 'row' }, sel, keyIn, modBox, macroSel, playSel, numIn, numLabel)));
-  if (b.remapped[btnLayer]) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Stored on the mouse' }),
-    el('div', { className: 'row' }, el('span', { textContent: actionLabel(saved) || 'Unknown' }), el('button', { className: 'ghost', textContent: 'Restore', title: 'Put back what the mouse stores', onclick: () => assign(b.name, '') }))));
+  if (b.remapped[btnLayer]) box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Stored on the ' + holder() }),
+    el('div', { className: 'row' }, el('span', { textContent: actionLabel(saved) || 'Unknown' }), el('button', { className: 'ghost', textContent: 'Restore', title: 'Put back what the ' + holder() + ' stores', onclick: () => assign(b.name, '') }))));
 }
 
 async function loadMacros(d) {
@@ -1701,9 +2167,9 @@ async function macroCall(body, done) {
 async function restoreAllButtons() {
   try {
     const r = await api('/api/buttons-restore', {});
-    btnData[dev.id] = r.buttons; dev.profile.buttons = {};
+    btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; dev.profile.buttons = {};
     sel = null; renderWork();
-    toast('Every button is back to what the mouse stores');
+    toast(`Every ${isBoard() ? 'key' : 'button'} is back to what the ${holder()} stores`);
   } catch (err) { toast(err.message, true); }
 }
 
@@ -1712,13 +2178,14 @@ async function assign(button, action, isUndo) {
   const prev = before && { action: before[layer], remapped: before.remapped[layer] };
   try {
     const r = await api('/api/button', { button, layer: btnLayer, assign: action });
-    btnData[dev.id] = r.buttons;
+    btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard;
+    refreshCell('onboard');
     const skey = btnLayer === 'normal' ? button : button + '/hypershift';
     dev.profile.buttons = dev.profile.buttons || {};
     if (action) dev.profile.buttons[skey] = action; else delete dev.profile.buttons[skey];
     if (!action) renderWork(); else refreshCell('btn:' + button);
     const undo = !isUndo && prev ? () => { btnLayer = layer; assign(button, prev.remapped ? prev.action : '', true); } : null;
-    toast(isUndo ? 'Undone' : action ? 'Saved to ' + dev.active : 'Restored what the mouse stores', false, undo);
+    toast(isUndo ? 'Undone' : action ? 'Saved to ' + dev.active : 'Restored what the ' + holder() + ' stores', false, undo);
   } catch (err) { toast(err.message, true); renderWork(); }
 }
 
@@ -1907,9 +2374,45 @@ function renderSettings() {
   // Startup and games
   const startup = group('Startup and games',
     row('Start with Windows', 'Your settings go back on as soon as you sign in. Off means they only apply while Secretarybird is running.', ...traySwitch('autostart', 'Start with Windows')),
-    row('Switch profiles with games', 'A profile tied to a program comes up while that program is in front, and goes back after.', ...traySwitch('auto_switch', 'Switch profiles with games')));
+    row('Switch profiles with games', 'A profile tied to a program comes up while that program is in front, and goes back after.', ...traySwitch('auto_switch', 'Switch profiles with games')),
+    row('Lights when away', 'While the PC is locked or its screen is off, the lights dim to a quarter or turn off, and come back when you return. Nothing is saved on the devices.',
+      seg('Lights when away', [['', 'Leave on'], ['dim', 'Dim'], ['off', 'Off']], a.away_lights || '', async v => {
+        try {
+          appSettings = await api('/api/settings', { key: 'away_lights', data: v });
+          toast(v === 'dim' ? 'Lights dim when away' : v === 'off' ? 'Lights turn off when away' : 'Lights stay on when away');
+          renderSettings();
+        } catch (e) { toast(e.message, true); }
+      })));
 
   // Notifications and checks
+  // Any whole percent: typed (saved on Enter or leaving the box) or stepped with - and +
+  // (saved once the clicking stops). Out of range goes back to the saved level.
+  const batteryLevel = () => {
+    const input = el('input', { type: 'number', className: 'num pct', min: 1, max: 95, step: 1, value: a.battery_warning_at, ariaLabel: 'Warn at percent' });
+    const minus = el('button', { type: 'button', textContent: '−', ariaLabel: 'Lower' });
+    const plus = el('button', { type: 'button', textContent: '+', ariaLabel: 'Higher' });
+    const ends = () => { minus.disabled = Number(input.value) <= 1; plus.disabled = Number(input.value) >= 95; };
+    let timer = 0;
+    const save = async () => {
+      clearTimeout(timer);
+      const v = Number(input.value);
+      if (v === a.battery_warning_at) return;
+      if (!Number.isInteger(v) || v < 1 || v > 95) { input.value = a.battery_warning_at; ends(); return toast('Pick a level from 1% to 95%', true); }
+      try { appSettings = await api('/api/settings', { key: 'battery_warning_at', value: v }); toast('Low battery warning at ' + v + '%'); renderSettings(); }
+      catch (e) { input.value = a.battery_warning_at; ends(); toast(e.message, true); }
+    };
+    const step = by => {
+      input.value = Math.min(95, Math.max(1, (Number(input.value) || a.battery_warning_at) + by));
+      ends(); clearTimeout(timer); timer = setTimeout(save, 600);
+    };
+    minus.onclick = () => step(-1);
+    plus.onclick = () => step(1);
+    input.onchange = save;
+    input.oninput = ends;
+    input.onkeydown = e => { if (e.key === 'Enter') input.blur(); };
+    ends();
+    return el('span', { className: 'pct-box' }, minus, input, el('span', { className: 'unit', textContent: '%' }), plus);
+  };
   const checkOut = el('span', { className: 'out' });
   const checkBtn = el('button', { className: 'ghost', textContent: 'Check now', onclick: async () => {
     checkBtn.disabled = true; checkOut.textContent = 'Checking…';
@@ -1932,7 +2435,9 @@ function renderSettings() {
   } });
   const notes = group('Notifications and checks',
     row('DPI and profile popups', 'A small popup above the clock when DPI, the on-board profile or a game profile changes.', ...traySwitch('popups', 'DPI and profile popups')),
-    row('Low battery warning', 'A notification when a wireless device drops to 15%.', ...traySwitch('battery_warning', 'Low battery warning')),
+    row('Low battery warning', 'A notification when a wireless device drops to ' + a.battery_warning_at + '%.',
+      batteryLevel(),
+      ...traySwitch('battery_warning', 'Low battery warning')),
     row('New version notices', 'Once a day, asks GitHub whether a newer Secretarybird is out. Nothing else is sent.', checkOut, checkBtn, ...traySwitch('updates', 'New version notices')),
     row('Weekly firmware check', 'Once a week, asks Razer’s website whether newer firmware is out for your devices. It never installs anything.', ...traySwitch('firmware_weekly', 'Weekly firmware check')));
 
@@ -1943,7 +2448,7 @@ function renderSettings() {
       const r = await api('/api/import', { data: JSON.parse(await f.text()) });
       devices = r.state.devices; devices.forEach(d => { d.profile = d.profile || {}; d.profilesData = d.profilesData || {}; d.profilesData[d.active] = d.profile; });
       dev = devices.find(d => dev && d.id === dev.id) || devices[0] || null;
-      toast(r.added ? 'Added ' + plural(r.added, 'profile') + '; yours were kept' : 'Nothing new in that file');
+      toast(r.added ? 'Added ' + plural(r.added, 'profile') + '; yours were kept. Pick one in the profile list.' : 'Nothing new in that file');
     } catch (err) { toast(err instanceof SyntaxError ? 'That file isn’t a Secretarybird backup' : err.message, true); }
     e.target.value = '';
   } });
@@ -2000,24 +2505,42 @@ function renderOverview() {
   const zones = devices.reduce((n, d) => n + d.leds.length, 0);
   $('ovSummary').textContent = [plural(devices.length, 'device'), zones && plural(zones, 'lighting zone'),
     unsupported.length && unsupported.length + ' not controllable yet'].filter(Boolean).join(' · ');
-  const grid = $('ovGrid');
-  grid.innerHTML = '';
-  devices.forEach(d => {
-    const top = el('div', { className: 'dtop' }, el('h3', { textContent: devLabel(d) }));
+  // One card per device, under a heading per kind; groups with no devices are left out.
+  const card = d => {
+    const sub = el('div', { className: 'dsub' }, el('span', { className: 'ell', textContent: (KINDS[d.kind] || 'Device') + ' · ' + d.active }));
     if (d.battery != null) {
       const b = el('span', { className: 'batt num' + (d.battery < 20 ? ' low' : ''), innerHTML: '<b></b>' });
-      b.firstChild.style.setProperty('--lvl', d.battery / 100); b.append(d.battery + '%'); top.append(b);
+      b.firstChild.style.setProperty('--lvl', d.battery / 100); b.append(d.battery + '%'); sub.append(b);
     }
     const dots = el('div', { className: 'dots' });
-    const p = d.profile || {}, keys = p.keys;
-    const colors = keys && keys.length ? [...new Set(keys.filter(k => k !== '000000'))].slice(0, 8).map(k => ({ color: k })) : d.leds.map(l => zoneOf(p, l.name));
+    const p = d.profile || {}, keys = p.keys, perKey = keys && keys.length;
+    const colors = perKey ? [...new Set(keys.filter(k => k !== '000000'))].slice(0, 8).map(k => ({ color: k })) : d.leds.map(l => zoneOf(p, l.name));
     if (d.lighting_control) colors.forEach(z => { const i = el('i'), paint = zonePaint(z); if (paint) i.style.background = paint; else i.className = 'off'; dots.append(i); });
-    else if (d.leds.length || d.matrix) dots.append(el('span', { className: 'hint', textContent: 'Lighting not controlled' }));
-    const meta = el('div', { className: 'dmeta num', textContent: [KINDS[d.kind] || 'Device', d.active, d.dpi && d.dpi.x + ' DPI', d.polling && hz(d.polling.hz), keys && keys.length && 'per-key'].filter(Boolean).join(' · ') });
-    grid.append(el('button', { className: 'dcard', onclick: () => openDevice(d) }, top, dots, meta));
-  });
-  unsupported.forEach(u => grid.append(el('div', { className: 'dcard muted' },
-    el('div', { className: 'dtop' }, el('h3', { textContent: u.name })), el('div', { className: 'dmeta', textContent: u.pid + ' · Connected · ' + u.reason }))));
+    const stats = [d.dpi && ['DPI', d.dpi.x], d.polling && ['Polling', hz(d.polling.hz)], perKey && ['Lighting', 'Per-key']].filter(Boolean);
+    if (!stats.length) stats.push(['Lighting', d.lighting_control ? plural(d.leds.length, 'zone') : (d.leds.length || d.matrix ? 'Not controlled' : 'None'), 'quiet']);
+    const foot = el('div', { className: 'dfoot' },
+      el('div', { className: 'dstats num' }, ...stats.map(([label, value, quiet]) => el('div', {}, el('small', { textContent: label }), el('b', { className: quiet || '', textContent: value })))),
+      dots);
+    return el('button', { className: 'dcard', onclick: () => openDevice(d) }, artTile(d),
+      el('div', { className: 'did' }, el('h3', { textContent: devLabel(d), title: devLabel(d) }), sub), foot);
+  };
+  const groups = [
+    ['Mice', 'mouse', d => d.kind === 'mouse'],
+    ['Keyboards and keypads', 'keyboard-tkl', d => d.kind === 'keyboard' || d.kind === 'keypad'],
+    ['Headsets', 'headset', d => d.kind === 'headset'],
+    ['Everything else', 'device', d => !['mouse', 'keyboard', 'keypad', 'headset'].includes(d.kind)],
+  ];
+  const box = $('ovGroups');
+  box.innerHTML = '';
+  const group = (title, art, cards) => {
+    if (!cards.length) return;
+    box.append(el('h2', { className: 'ov-group', innerHTML: `<svg class="dart" viewBox="0 0 24 24" aria-hidden="true">${ART[art]}</svg>` }, title, el('span', { textContent: '· ' + cards.length })),
+      el('div', { className: 'ov-grid' }, ...cards));
+  };
+  groups.forEach(([title, art, match]) => group(title, art, devices.filter(match).map(card)));
+  group('Connected, not controllable yet', 'device', unsupported.map(u => el('div', { className: 'dcard muted' }, artTile(u),
+    el('div', { className: 'did' }, el('h3', { textContent: u.name, title: u.name }), el('div', { className: 'dsub' }, el('span', { textContent: u.pid + ' · Connected' }))),
+    el('div', { className: 'dfoot' }, el('div', { className: 'dstats' }, el('div', {}, el('small', { textContent: 'Why' }), el('b', { className: 'quiet', textContent: u.reason })))))));
 }
 
 // ---------- Live updates, loading, global actions ----------

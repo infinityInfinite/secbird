@@ -5,7 +5,7 @@
 
 use crate::commands as cmd;
 use crate::db::{Db, RAZER_VID};
-use crate::device::{Device, TXID_CANDIDATES};
+use crate::device::{Device, DOCK_LED, DOCK_TXID, TXID_CANDIDATES};
 use crate::error::Error;
 use crate::proto::Command;
 use hidapi::HidApi;
@@ -20,6 +20,10 @@ pub struct Interface {
     pub usage: String,
     /// Transaction id this interface answered Protocol 2.5 with, if any.
     pub txid: Option<String>,
+    /// Feature report id it answered under; 0 over USB (see `NumberedReport`).
+    pub report_id: Option<u8>,
+    /// Feature reports its HID descriptor declares: (report id, bytes).
+    pub features: Vec<(u8, usize)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,11 +45,18 @@ pub struct DeviceReport {
     pub simulated: bool,
     pub interface: i32,
     pub txid: String,
+    /// Feature report id the commands went under; 0 over USB.
+    pub report_id: u8,
     /// Shortened for privacy.
     pub serial: String,
     pub probes: Vec<Probe>,
     /// LED ids that answered a brightness GET.
     pub leds: Vec<u8>,
+    /// Mouse docks only: the same kind of reads sent to the dock itself (see [`DOCK_TXID`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dock: Vec<Probe>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dock_leds: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,6 +72,7 @@ const PROBES: &[(&str, Command, u8, &[u8])] = &[
     ("firmware", cmd::FIRMWARE.get(), cmd::FIRMWARE_SIZE, &[]),
     ("firmware (full)", cmd::FIRMWARE_EXT.get(), cmd::FIRMWARE_EXT_SIZE, &[]),
     ("device mode", cmd::DEVICE_MODE.get(), cmd::DEVICE_MODE_SIZE, &[]),
+    ("active on-board slot", cmd::ACTIVE_SLOT.get(), 1, &[]),
     ("polling rate", cmd::POLLING.get(), cmd::POLLING_SIZE, &[]),
     ("polling rate (high speed)", cmd::POLLING_HS.get(), cmd::POLLING_HS_SIZE, &[]),
     ("dpi", cmd::DPI.get(), cmd::DPI_SIZE, &[cmd::NOSTORE]),
@@ -73,6 +85,18 @@ const PROBES: &[(&str, Command, u8, &[u8])] = &[
     ("macro storage", cmd::MACRO_STORAGE.get(), cmd::MACRO_STORAGE_SIZE, &[]),
     ("macro count", cmd::MACRO_COUNT.get(), cmd::MACRO_COUNT_SIZE, &[]),
     ("button ids", cmd::BUTTON_IDS.get(), cmd::BUTTON_IDS_SIZE, &[]),
+    ("sensor rotation", cmd::SENSOR_ANGLE.get(), cmd::SENSOR_ANGLE_SIZE, &[cmd::VARSTORE]),
+    ("gaming mode", cmd::GAME_MODE.get(), cmd::GAME_MODE_SIZE, &[]),
+];
+
+/// Keyboard key remapping (02:0D), which Synapse defines but never sends: whether the
+/// keyboard answers the key list and a read of key A (31), in the live slot and slot 1.
+const KEY_PROBES: &[(&str, Command, u8, &[u8])] = &[
+    ("key ids", cmd::KEY_IDS, cmd::KEY_SIZE, &[1, 0, 0]),
+    ("key ids (live slot)", cmd::KEY_IDS, cmd::KEY_SIZE, &[0, 0, 0]),
+    ("key A (live slot)", cmd::KEY.get(), cmd::KEY_SIZE, &[0, 31, 0]),
+    ("key A (slot 1)", cmd::KEY.get(), cmd::KEY_SIZE, &[1, 31, 0]),
+    ("key A HyperShift (slot 1)", cmd::KEY.get(), cmd::KEY_SIZE, &[1, 31, 1]),
 ];
 
 /// Laptop fan and power reads (Synapse's thermal module, class 0D, and power class 07), for
@@ -105,6 +129,21 @@ const LAPTOP_PROBES: &[(&str, Command, u8, &[u8])] = &[
     ("backlight brightness (old)", cmd::LED_BRIGHTNESS.get(), 0x03, &[cmd::VARSTORE, 5]),
 ];
 
+/// Read-only GETs for a mouse dock's own settings, from Synapse's dock code
+/// (`rzDevice25Linker`). Serial is left out: its reply would print in full.
+const DOCK_PROBES: &[(&str, Command, u8, &[u8])] = &[
+    ("firmware", cmd::FIRMWARE.get(), cmd::FIRMWARE_SIZE, &[]),
+    ("dock firmware", Command::new(0x00, 0x91), 0x02, &[]),
+    ("dock edition", Command::new(0x00, 0xBC), 0x03, &[]),
+    ("mouse on dock charging", Command::new(0x00, 0xBB), 0x01, &[]),
+    ("paired mice", cmd::WIRELESS_DEVICES.get(), cmd::WIRELESS_DEVICES_SIZE, &[]),
+    ("auto pairing", Command::new(0x00, 0xD5), 0x01, &[]),
+    ("dock LED brightness", cmd::MATRIX_BRIGHTNESS.get(), cmd::MATRIX_BRIGHTNESS_SIZE, &[cmd::VARSTORE, DOCK_LED]),
+    ("dock LED effect", cmd::MATRIX_EFFECT.get(), 0x0C, &[cmd::VARSTORE, DOCK_LED]),
+    ("charging effect", Command::new(0x03, 0x90), 0x01, &[]),
+    ("dock lighting sync", Command::new(0x03, 0x8F), 0x03, &[cmd::VARSTORE, DOCK_LED]),
+];
+
 /// LED ids tried with a brightness GET. Razer uses 0x00-0x14 across its products.
 const LED_IDS: std::ops::RangeInclusive<u8> = 0x00..=0x14;
 
@@ -118,16 +157,16 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
 
     for info in infos {
         let pid = info.product_id();
-        let spec = db.get(pid).cloned();
-        let dev = api.open_path(info.path()).ok().and_then(|hid| {
-            Device::open(Box::new(hid), pid, info.interface_number(), info.path().to_owned(), &TXID_CANDIDATES, spec)
-        });
+        let features = crate::transport::feature_reports(api, info.path());
+        let dev = crate::device::open_interface(api, info.path(), pid, info.interface_number(), &TXID_CANDIDATES, db.spec(pid));
         interfaces.push(Interface {
             pid: format!("{pid:04X}"),
             interface: info.interface_number(),
             usage_page: format!("{:04X}", info.usage_page()),
             usage: format!("{:04X}", info.usage()),
             txid: dev.as_ref().map(|d| format!("{:02X}", d.txid)),
+            report_id: dev.as_ref().map(|d| d.report_id()),
+            features,
         });
         // One full probe per product, from the first interface that answers.
         if let Some(dev) = dev {
@@ -149,24 +188,36 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
 /// Send every read-only probe to one device.
 pub fn probe(dev: &Device, simulated: bool) -> DeviceReport {
     let laptop = dev.spec.as_ref().is_none_or(|s| s.kind == crate::Kind::Laptop);
+    let keyboard = laptop || dev.spec.as_ref().is_some_and(|s| matches!(s.kind, crate::Kind::Keyboard | crate::Kind::Keypad));
+    let run = |txid: u8, &(name, command, size, args): &(&'static str, Command, u8, &[u8])| {
+        let sent = if txid == dev.txid { dev.transact(command, size, args) } else { dev.transact_as(txid, command, size, args) };
+        let (status, reply) = match sent {
+            Ok(r) => ("ok".to_string(), hex(&r.args()[..size as usize])),
+            Err(Error::Device { status, .. }) => (format!("{status:?}"), String::new()),
+            Err(Error::NoReply(_)) => ("no reply".to_string(), String::new()),
+            Err(e) => (e.to_string(), String::new()),
+        };
+        Probe { name, command: command.to_string(), status, reply }
+    };
     let probes = PROBES
         .iter()
+        .chain(KEY_PROBES.iter().filter(|_| keyboard))
         .chain(LAPTOP_PROBES.iter().filter(|_| laptop))
-        .map(|&(name, command, size, args)| {
-            let (status, reply) = match dev.transact(command, size, args) {
-                Ok(r) => ("ok".to_string(), hex(&r.args()[..size as usize])),
-                Err(Error::Device { status, .. }) => (format!("{status:?}"), String::new()),
-                Err(Error::NoReply(_)) => ("no reply".to_string(), String::new()),
-                Err(e) => (e.to_string(), String::new()),
-            };
-            Probe { name, command: command.to_string(), status, reply }
-        })
+        .map(|p| run(dev.txid, p))
         .collect();
-    let leds = LED_IDS
-        .filter(|&led| {
-            dev.get(cmd::MATRIX_BRIGHTNESS, cmd::MATRIX_BRIGHTNESS_SIZE, &[cmd::VARSTORE, led, 0]).is_ok()
-        })
-        .collect();
+    let leds_at = |txid: u8| -> Vec<u8> {
+        LED_IDS
+            .filter(|&led| {
+                let (get, size, args) = (cmd::MATRIX_BRIGHTNESS.get(), cmd::MATRIX_BRIGHTNESS_SIZE, [cmd::VARSTORE, led, 0]);
+                let sent = if txid == dev.txid { dev.transact(get, size, &args) } else { dev.transact_as(txid, get, size, &args) };
+                sent.is_ok()
+            })
+            .collect()
+    };
+    let leds = leds_at(dev.txid);
+    let dock_txid = dev.is_mouse_dock() && dev.txid != DOCK_TXID;
+    let dock = if dock_txid { DOCK_PROBES.iter().map(|p| run(DOCK_TXID, p)).collect() } else { Vec::new() };
+    let dock_leds = if dock_txid { leds_at(DOCK_TXID) } else { Vec::new() };
     DeviceReport {
         pid: format!("{:04X}", dev.pid),
         name: dev.name(),
@@ -174,14 +225,24 @@ pub fn probe(dev: &Device, simulated: bool) -> DeviceReport {
         simulated,
         interface: dev.interface,
         txid: format!("{:02X}", dev.txid),
-        serial: dev.serial().map(|s| shorten(&s)).unwrap_or_default(),
+        report_id: dev.report_id(),
+        // Some Blades answer 0xFF bytes (#34), which printed as replacement characters.
+        serial: match dev.serial() {
+            Ok(s) if s.chars().all(|c| c.is_ascii_graphic()) => shorten(&s),
+            Ok(_) => "none".into(),
+            Err(_) => String::new(),
+        },
         probes,
         leds,
+        dock,
+        dock_leds,
     }
 }
 
+/// Every byte of a short reply: a trailing 00 can be the answer (#34: smart dimming's
+/// `01 00 00` read as just `01`). Long replies drop their zero tail past the first 16.
 fn hex(bytes: &[u8]) -> String {
-    let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1).max(bytes.len().min(16));
     bytes[..end].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
 }
 
@@ -207,8 +268,20 @@ impl std::fmt::Display for Report {
             writeln!(f, "  (none)")?;
         }
         for i in &self.interfaces {
-            let answers = i.txid.as_ref().map(|t| format!("  <- answers Protocol 2.5 (txid {t})")).unwrap_or_default();
-            writeln!(f, "  {}  interface {:<2} usage {}:{}{answers}", i.pid, i.interface, i.usage_page, i.usage)?;
+            let id = match i.report_id {
+                Some(id) if id != 0 => format!(", report id {id}"),
+                _ => String::new(),
+            };
+            let answers = i.txid.as_ref().map(|t| format!("  <- answers Protocol 2.5 (txid {t}{id})")).unwrap_or_default();
+            // Feature reports matter for Bluetooth, whose descriptor numbers them (#10).
+            let features = match i.features.as_slice() {
+                [] => String::new(),
+                list => {
+                    let list: Vec<String> = list.iter().map(|(id, len)| format!("{id}:{len}")).collect();
+                    format!("  feature {}", list.join(" "))
+                }
+            };
+            writeln!(f, "  {}  interface {:<2} usage {}:{}{features}{answers}", i.pid, i.interface, i.usage_page, i.usage)?;
         }
 
         for d in &self.devices {
@@ -218,13 +291,23 @@ impl std::fmt::Display for Report {
                 (false, false) => "NOT in database",
             };
             writeln!(f, "\nDevice {} {} ({known})", d.pid, d.name)?;
-            writeln!(f, "  interface {}, txid {}, serial {}", d.interface, d.txid, d.serial)?;
+            let id = if d.report_id != 0 { format!(", report id {}", d.report_id) } else { String::new() };
+            writeln!(f, "  interface {}, txid {}{id}, serial {}", d.interface, d.txid, d.serial)?;
             for p in &d.probes {
                 writeln!(f, "  {:<26} {}  {:<12} {}", p.name, p.command, p.status, p.reply)?;
             }
             let leds: Vec<String> = d.leds.iter().map(|l| l.to_string()).collect();
             let leds = if leds.is_empty() { "none".to_string() } else { leds.join(", ") };
             writeln!(f, "  {:<26} 0F:84  {leds}", "lighting zones (LED ids)")?;
+            if !d.dock.is_empty() {
+                writeln!(f, "  The dock itself (txid {DOCK_TXID:02X}):")?;
+                for p in &d.dock {
+                    writeln!(f, "    {:<24} {}  {:<12} {}", p.name, p.command, p.status, p.reply)?;
+                }
+                let leds: Vec<String> = d.dock_leds.iter().map(|l| l.to_string()).collect();
+                let leds = if leds.is_empty() { "none".to_string() } else { leds.join(", ") };
+                writeln!(f, "    {:<24} 0F:84  {leds}", "lighting zones (LED ids)")?;
+            }
         }
         if self.devices.is_empty() {
             writeln!(f, "\nNo interface answered Protocol 2.5.")?;
@@ -251,7 +334,7 @@ mod tests {
         let r = report_for(&Sim::mouse(), MOUSE_PID);
         assert_eq!(r.leds, [1, 4, 10]);
         assert_eq!(status(&r, "dpi"), "ok");
-        assert_eq!(r.probes.iter().find(|p| p.name == "dpi").unwrap().reply, "00 03 20 03 20");
+        assert_eq!(r.probes.iter().find(|p| p.name == "dpi").unwrap().reply, "00 03 20 03 20 00 00");
         assert_eq!(status(&r, "battery"), "NotSupported");
         assert_eq!(r.serial, "SIMM...01");
     }
@@ -286,8 +369,13 @@ mod tests {
 
     #[test]
     fn hex_and_shorten() {
-        assert_eq!(hex(&[1, 0, 0x20, 0, 0]), "01 00 20");
-        assert_eq!(hex(&[0, 0]), "");
+        assert_eq!(hex(&[1, 0, 0x20, 0, 0]), "01 00 20 00 00");
+        assert_eq!(hex(&[0, 0]), "00 00");
+        let mut long = [0u8; 0x50];
+        long[1] = 7;
+        assert_eq!(hex(&long), ["00 07", &" 00".repeat(14)].concat());
+        long[20] = 1;
+        assert_eq!(hex(&long).split(' ').count(), 21);
         assert_eq!(shorten("AB1234C56789012"), "AB12...12");
         assert_eq!(shorten("ABC"), "***");
     }

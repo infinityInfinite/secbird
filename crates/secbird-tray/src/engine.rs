@@ -1,8 +1,8 @@
 //! Device and profile handling for the tray, kept free of Win32 code.
 
-use secbird_core::{config_dir, discover, hidapi::HidApi, Db, Device, Result, Store};
+use secbird_core::{config_dir, discover, hidapi::HidApi, Db, Device, Dimming, Result, Store};
 use std::collections::{HashMap, HashSet};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 pub struct Engine {
     api: HidApi,
@@ -18,7 +18,22 @@ pub struct Engine {
     /// Latest DPI each device reported through its event reports.
     live_dpi: HashMap<String, (u16, u16)>,
     live_seq: u64,
+    /// No per-key refresh until then, while the editor's light finder is open.
+    frames_paused_until: Option<Instant>,
+    /// Brightness percent while the PC is locked or its screen is off ([`Engine::lights_away`]).
+    away: Option<u8>,
+    /// Devices that didn't answer [`Engine::lights_back`], and until when to keep trying.
+    relight: HashMap<String, Instant>,
+    /// Devices that didn't answer [`Engine::lights_away`], and until when to keep trying.
+    dim: HashMap<String, Instant>,
 }
+
+const FINDER_PAUSE: Duration = Duration::from_secs(10 * 60);
+/// A wireless keyboard can miss the "back" write and answer ~20 s later (#52).
+pub const RELIGHT_FOR: Duration = Duration::from_secs(2 * 60);
+/// A device can miss the "away" write too (a Basilisk V4 HyperSpeed often does, right as the
+/// screen goes off) and then stays lit the whole time: try again for a while.
+pub const DIM_FOR: Duration = Duration::from_secs(30);
 
 /// Battery state of one wireless device.
 pub struct Battery {
@@ -29,10 +44,22 @@ pub struct Battery {
 }
 
 /// A connected Razer product that can't be controlled (yet), shown so it isn't silently missing.
+/// Why a wireless device we know is quiet, most often: it sleeps until a keypress (#37).
+const ASLEEP: &str = "Not answering. Asleep? Press a key or move it";
+const BLUETOOTH: &str = "Connected over Bluetooth and not answering. Use the cable or the USB receiver";
+
 pub struct Unsupported {
     pub pid: u16,
     pub name: String,
     pub reason: &'static str,
+}
+
+/// What a retry of [`Engine::lights_away`] or [`Engine::lights_back`] did, by device key.
+pub struct LightsRetry {
+    /// Took the write this time.
+    pub done: Vec<String>,
+    /// Still not answering when the time ran out: no more tries.
+    pub gave_up: Vec<String>,
 }
 
 /// What happened when a device's active profile was sent to it.
@@ -61,6 +88,10 @@ impl Engine {
             apps_read: None,
             live_dpi: HashMap::new(),
             live_seq: 0,
+            frames_paused_until: None,
+            away: None,
+            relight: HashMap::new(),
+            dim: HashMap::new(),
         })
     }
 
@@ -171,6 +202,177 @@ impl Engine {
             .collect()
     }
 
+    /// Zones showing a wireless mouse's battery (a dock's light, #39) follow its level.
+    /// Failures are left out: a mouse off its dock or asleep doesn't answer, and the
+    /// colour stays until the next check.
+    pub fn refresh_battery_lights(&self) {
+        let Ok(mut store) = Self::store() else { return };
+        for dev in self.devices.iter().filter(|d| d.spec.as_ref().is_some_and(|s| s.wireless)) {
+            let p = store.for_device(dev);
+            let name = p.effective(self.foreground()).to_string();
+            p.refresh_battery_lights(&name, dev);
+        }
+    }
+
+    /// Per-key colors of wired keyboards and keypads, sent again. Leaving quick adjustment
+    /// mode (#45) leaves them dark, and the keyboard doesn't say when; Synapse streams
+    /// frames all the time, so this does the same at a slow pace. Wireless boards are left
+    /// alone: the traffic would keep them awake. Failures are left out, as for batteries.
+    /// Not while away: the lights are down then anyway.
+    pub fn refresh_frames(&self) {
+        if self.away.is_some() || self.frames_paused_until.is_some_and(|t| Instant::now() < t) {
+            return;
+        }
+        let Ok(mut store) = Self::store() else { return };
+        let wired_boards = self.devices.iter().filter(|d| {
+            d.matrix().is_some()
+                && d.spec.as_ref().is_some_and(|s| {
+                    !s.wireless && matches!(s.kind, secbird_core::Kind::Keyboard | secbird_core::Kind::Keypad)
+                })
+        });
+        for dev in wired_boards {
+            let p = store.for_device(dev);
+            let name = p.effective(self.foreground()).to_string();
+            p.refresh_frame(&name, dev);
+        }
+    }
+
+    /// Laptops set to "stays lit" still fade by themselves (#34), but any read restarts
+    /// that idle fade, so read the setting back now and then. Only while the tray runs.
+    pub fn keep_laptops_lit(&self) {
+        if self.away.is_some() {
+            return;
+        }
+        let Ok(mut store) = Self::store() else { return };
+        let laptops = self.devices.iter().filter(|d| d.spec.as_ref().is_some_and(|s| s.kind == secbird_core::Kind::Laptop));
+        for dev in laptops {
+            let p = store.for_device(dev);
+            let name = p.effective(self.foreground()).to_string();
+            let stays_lit = Dimming::StaysLit.to_string();
+            if p.profiles.get(&name).is_some_and(|p| p.dimming.as_deref() == Some(stays_lit.as_str())) {
+                let _ = dev.dimming();
+            }
+        }
+    }
+
+    /// The PC was locked or its screen went off (#48): every zone this app controls goes
+    /// to `percent` of its saved brightness, with writes that aren't saved, so a replug or
+    /// power cycle brings the lights back. Also call it after a rescan while away, for
+    /// devices that just arrived. Devices with the older lighting commands are left lit.
+    /// Returns the keys of the devices that missed it: [`Engine::retry_lights_away`] tries
+    /// them again for [`DIM_FOR`].
+    pub fn lights_away(&mut self, percent: u8) -> Vec<String> {
+        self.away = Some(percent);
+        self.relight.clear();
+        let missed = self.each_zone(|dev, led| dim_zone(dev, led, percent));
+        let until = Instant::now() + DIM_FOR;
+        self.dim = missed.iter().map(|key| (key.clone(), until)).collect();
+        missed
+    }
+
+    /// [`Engine::lights_away`] again for the devices that missed it, while still away, until
+    /// they answer or [`DIM_FOR`] runs out.
+    pub fn retry_lights_away(&mut self) -> LightsRetry {
+        let gave_up = expire(&mut self.dim, Instant::now());
+        let Some(percent) = self.away.filter(|_| !self.dim.is_empty()) else {
+            return LightsRetry { done: Vec::new(), gave_up };
+        };
+        let missed = self.each_zone(|dev, led| {
+            if !self.dim.contains_key(&dev.key()) {
+                return Ok(());
+            }
+            dim_zone(dev, led, percent)
+        });
+        let done: Vec<String> = self.dim.keys().filter(|k| !missed.contains(k) && self.has(k)).cloned().collect();
+        for key in &done {
+            self.dim.remove(key);
+        }
+        LightsRetry { done, gave_up }
+    }
+
+    /// Back from [`Engine::lights_away`]: the saved brightness again, read from the device
+    /// (it answers the saved level, not the dimmed one), so it works after a tray restart too.
+    /// Then the profiles, in case one changed while away. Returns the keys of the devices
+    /// that missed it: [`Engine::retry_lights_back`] tries them again for [`RELIGHT_FOR`].
+    pub fn lights_back(&mut self) -> Vec<String> {
+        if self.away.take().is_none() {
+            return Vec::new();
+        }
+        self.dim.clear();
+        let missed = self.each_zone(|dev, led| dev.set_brightness_live(led, dev.brightness(led)?));
+        let until = Instant::now() + RELIGHT_FOR;
+        self.relight = missed.iter().map(|key| (key.clone(), until)).collect();
+        self.apply(&self.all_keys());
+        missed
+    }
+
+    /// [`Engine::lights_back`] again for the devices that missed it, until they answer or
+    /// [`RELIGHT_FOR`] runs out. Those that answer get their profile again.
+    pub fn retry_lights_back(&mut self) -> LightsRetry {
+        let gave_up = expire(&mut self.relight, Instant::now());
+        if self.relight.is_empty() || self.away.is_some() {
+            return LightsRetry { done: Vec::new(), gave_up };
+        }
+        let missed = self.each_zone(|dev, led| {
+            if !self.relight.contains_key(&dev.key()) {
+                return Ok(());
+            }
+            dev.set_brightness_live(led, dev.brightness(led)?)
+        });
+        let done: Vec<String> = self.relight.keys().filter(|k| !missed.contains(k) && self.has(k)).cloned().collect();
+        for key in &done {
+            self.relight.remove(key);
+        }
+        if !done.is_empty() {
+            self.apply(&done);
+        }
+        LightsRetry { done, gave_up }
+    }
+
+    /// Whether the device with this key is in the list.
+    fn has(&self, key: &str) -> bool {
+        self.devices.iter().any(|d| d.key() == key)
+    }
+
+    /// Device names for the log, without serial numbers.
+    pub fn names(&self, keys: &[String]) -> String {
+        let names: Vec<String> = keys
+            .iter()
+            .map(|key| match self.devices.iter().find(|d| d.key() == *key) {
+                Some(dev) => self.label(dev),
+                None => key.split(':').next().unwrap_or_default().to_string(),
+            })
+            .collect();
+        names.join(", ")
+    }
+
+    pub fn is_away(&self) -> bool {
+        self.away.is_some()
+    }
+
+    /// Run `f` on each lighting zone of each device whose lighting this app controls.
+    /// Returns the keys of the devices where `f` failed: an asleep wireless device doesn't answer.
+    fn each_zone(&self, f: impl Fn(&Device, u8) -> Result<()>) -> Vec<String> {
+        let Ok(mut store) = Self::store() else { return Vec::new() };
+        let mut failed = Vec::new();
+        for dev in &self.devices {
+            if store.for_device(dev).lighting_off {
+                continue;
+            }
+            let leds: Vec<u8> = dev.spec.iter().flat_map(|s| s.leds.iter().map(|l| l.id)).collect();
+            if leds.into_iter().map(|led| f(dev, led)).filter(Result::is_err).count() > 0 {
+                failed.push(dev.key());
+            }
+        }
+        failed
+    }
+
+    /// The editor's light finder shows one light at a time; don't paint over it. A finder
+    /// left open (a closed browser never says) stops pausing after a while.
+    pub fn pause_frames(&mut self, pause: bool) {
+        self.frames_paused_until = pause.then(|| Instant::now() + FINDER_PAUSE);
+    }
+
     /// Re-enumerate devices. Returns the keys of devices that were not present before.
     pub fn rescan(&mut self) -> Vec<String> {
         let before: HashSet<String> = self.devices.iter().map(|d| d.key()).collect();
@@ -186,12 +388,21 @@ impl Engine {
                 Some(spec) if spec.lighting == secbird_core::Lighting::Kraken => {
                     Unsupported { pid, name: spec.name.clone(), reason: "Headset protocol not supported yet" }
                 }
+                Some(spec) if spec.wireless => Unsupported { pid, name: spec.name.clone(), reason: ASLEEP },
                 Some(spec) => Unsupported { pid, name: spec.name.clone(), reason: "Not answering. Is Synapse running?" },
-                None => Unsupported { pid, name: format!("Razer device {pid:04X}"), reason: "Unknown model. Run secbird report" },
+                None => match db.bluetooth_name(pid) {
+                    Some(name) => Unsupported { pid, name, reason: BLUETOOTH },
+                    None => Unsupported { pid, name: format!("Razer device {pid:04X}"), reason: "Unknown model. Run secbird report" },
+                },
             })
             .collect();
         self.synapse = secbird_core::debloat::synapse_running();
         self.devices.iter().map(|d| d.key()).filter(|k| !before.contains(k)).collect()
+    }
+
+    /// A known wireless device is plugged in (its receiver is) but not answering yet.
+    pub fn has_sleeping(&self) -> bool {
+        self.unsupported.iter().any(|u| u.reason == ASLEEP)
     }
 
     /// Read profiles fresh from disk, so changes made with the CLI are picked up.
@@ -225,6 +436,9 @@ impl Engine {
             .map(|dev| match &mut store {
                 Ok(store) => {
                     let p = store.for_device(dev);
+                    // Lights stay down while away (a lock screen in front switches profiles);
+                    // this copy of the store is never saved.
+                    p.lighting_off |= self.away.is_some();
                     let name = p.effective(self.foreground()).to_string();
                     let failures = p
                         .apply(&name, dev)
@@ -238,6 +452,31 @@ impl Engine {
                     profile: String::new(),
                     failures: vec![format!("profiles.json: {e}")],
                 },
+            })
+            .collect()
+    }
+
+    /// Wireless mice that dropped their button remaps while asleep (#45) get them back.
+    /// `skip` holds keys re-sent moments ago, left alone so a mouse that keeps losing
+    /// them isn't written over and over. Returns the keys re-sent, with their reports.
+    pub fn restore_lost_buttons(&self, skip: &HashSet<String>) -> Vec<(String, ApplyReport)> {
+        let Ok(mut store) = Self::store() else { return Vec::new() };
+        self.devices
+            .iter()
+            .filter(|d| d.spec.as_ref().is_some_and(|s| s.wireless && s.kind == secbird_core::Kind::Mouse))
+            .filter(|d| !skip.contains(&d.key()))
+            .filter_map(|dev| {
+                let p = store.for_device(dev);
+                let name = p.effective(self.foreground()).to_string();
+                if !p.buttons_lost(&name, dev) {
+                    return None;
+                }
+                let failures = p
+                    .apply_buttons(&name, dev)
+                    .into_iter()
+                    .filter_map(|a| a.result.err().map(|e| format!("{}: {e}", a.setting)))
+                    .collect();
+                Some((dev.key(), ApplyReport { device: self.label(dev), profile: name, failures }))
             })
             .collect()
     }
@@ -279,5 +518,39 @@ impl Engine {
             n if twins > 1 && n > 0 => format!("{} ({})", dev.name(), &dev.serial[n.saturating_sub(4)..]),
             _ => dev.name(),
         }
+    }
+}
+
+/// One zone to `percent` of its saved brightness, not saved on the device.
+fn dim_zone(dev: &Device, led: u8, percent: u8) -> Result<()> {
+    let saved = dev.brightness(led)?;
+    dev.set_brightness_live(led, (saved as u32 * percent as u32 / 100) as u8)
+}
+
+/// Drop the entries whose time ran out, and return their keys.
+fn expire(until: &mut HashMap<String, Instant>, now: Instant) -> Vec<String> {
+    let mut gone: Vec<String> = until.iter().filter(|(_, t)| now >= **t).map(|(key, _)| key.clone()).collect();
+    gone.sort();
+    for key in &gone {
+        until.remove(key);
+    }
+    gone
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expire;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn retries_run_out_one_device_at_a_time() {
+        let now = Instant::now();
+        let mut until = HashMap::from([("00EA:A".to_string(), now + Duration::from_secs(30)), ("02C9:B".to_string(), now)]);
+        assert_eq!(expire(&mut until, now), ["02C9:B"]);
+        assert_eq!(until.len(), 1);
+        assert!(expire(&mut until, now + Duration::from_secs(29)).is_empty());
+        assert_eq!(expire(&mut until, now + Duration::from_secs(30)), ["00EA:A"]);
+        assert!(until.is_empty());
     }
 }

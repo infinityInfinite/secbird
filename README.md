@@ -3,6 +3,18 @@
   <img src="docs/banner.png" alt="Secretarybird: your Razer gear, minus the bloat." width="100%">
 </picture>
 
+<div align="center">
+  <a href="https://github.com/infinityInfinite/secbird/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/infinityInfinite/secbird?style=flat"></a>
+  <a href="https://github.com/infinityInfinite/secbird/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/infinityInfinite/secbird/total.svg?style=flat"></a>
+  <a href="https://github.com/infinityInfinite/secbird/commits"><img alt="Commit activity" src="https://img.shields.io/github/commit-activity/m/infinityInfinite/secbird?style=flat"></a>
+  <a href="https://github.com/infinityInfinite/secbird/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/infinityInfinite/secbird?style=flat"></a>
+  <a href="#legal"><img alt="License" src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue?style=flat"></a>
+</div>
+
+> [!NOTE]
+> Secretarybird is in beta and changes often. **Star** ⭐ and **Watch** 👀 the repo to hear when a
+> new release is out.
+
 A small, lightweight replacement for Razer Synapse on Windows. Set your Razer mouse,
 keyboard and other peripherals: lighting, DPI, polling rate, button remapping and profiles, without
 Synapse's background services, account, ads, pop-ups or restart prompts.
@@ -17,12 +29,26 @@ Synapse's background services, account, ads, pop-ups or restart prompts.
 > Viper mice to BlackWidow keyboards and a Tartarus keypad (see below). Other devices are
 > supported from public protocol facts and may not work yet. [Tell us how yours does](#help-us-support-your-device).
 
-### [⬇ Download for Windows](https://github.com/infinityInfinite/secbird/releases/latest)
+### [⬇ Download for Windows](https://github.com/infinityInfinite/secbird/releases/latest) · [⬇ Download for Linux](#linux-command-line-beta)
 
 Free · Windows 10 and 11 · on the page that opens, click `Secretarybird-Setup-<version>.exe`.
-On Linux there's the command line, in beta: see [Linux](#linux-command-line-beta).
+On Linux it's the command line, in beta: see [Linux](#linux-command-line-beta).
 
 ![All devices](docs/overview.png)
+
+## Beyond Synapse
+
+Things Secretarybird does that Synapse won't:
+
+- **Run on Linux.** The command line works on any x86_64 distribution.
+- **Compare profiles.** Every profile of a device side by side on one screen.
+- **Script it.** The [`secbird` command line](#command-line) does what the editor does: DPI,
+  lighting, remaps, macros, profiles.
+- **Plain files.** Your settings are one `profiles.json`; back it up or copy it to another PC.
+- **Share the lights.** Hand a device's RGB to another app and keep using Secretarybird for
+  everything else.
+- **Clean up after Razer.** [`secbird debloat`](#debloat) turns off Razer's background services,
+  and `debloat undo` puts them back.
 
 ## Install
 
@@ -49,12 +75,16 @@ The `secbird` command line runs on Linux: DPI, polling rate, lighting and effect
 remaps, macros, profiles and reports, the same as on Windows. The tray and the editor are
 Windows-only for now.
 
-1. From the [latest release](https://github.com/infinityInfinite/secbird/releases/latest), download
-   `secbird-<version>-linux-x86_64.tar.gz`. It's one static binary for any x86_64 distribution.
-2. Unpack it and install the binary and the udev rule, which lets you use Razer devices
-   without root:
+1. Download and unpack the latest version. It's one static binary for any x86_64 distribution:
    ```sh
-   tar xf secbird-*-linux-x86_64.tar.gz
+   url=$(curl -s https://api.github.com/repos/infinityInfinite/secbird/releases/latest | grep -o 'https://[^"]*linux-x86_64[.]tar[.]gz')
+   curl -sL "$url" | tar xz
+   ```
+   Or download `secbird-<version>-linux-x86_64.tar.gz` from the
+   [latest release](https://github.com/infinityInfinite/secbird/releases/latest) and run
+   `tar xf secbird-*-linux-x86_64.tar.gz`.
+2. Install the binary and the udev rule, which lets you use Razer devices without root:
+   ```sh
    cd secbird-*-linux-x86_64
    sudo ./install.sh
    ```
@@ -183,6 +213,9 @@ run `secbird report` and [open a device report](https://github.com/infinityInfin
 saying what works and what doesn't. The report only reads from your devices and shortens serial
 numbers. Reports are how devices move from "listed" to "verified".
 
+Please send a report rather than a pull request that edits `devices.json`: the report shows every
+value the device answers with, so each entry can be checked against it before it ships.
+
 ### Verified on real hardware
 
 **Mice**
@@ -195,6 +228,7 @@ numbers. Reports are how devices move from "listed" to "verified".
 
 **Keyboards and keypads**
 - BlackWidow 2019 ([#12](https://github.com/infinityInfinite/secbird/issues/12))
+- BlackWidow V4 Low-Profile HyperSpeed, wireless and wired ([#28](https://github.com/infinityInfinite/secbird/pull/28), [#31](https://github.com/infinityInfinite/secbird/pull/31))
 - Cynosa V2
 - Tartarus V2 ([#14](https://github.com/infinityInfinite/secbird/issues/14))
 

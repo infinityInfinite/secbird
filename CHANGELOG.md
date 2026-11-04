@@ -1,5 +1,189 @@
 # Changelog
 
+## [0.5.1] - 2026-10-30
+
+### Added
+- Bluetooth, first try: mice connected over Bluetooth are now asked the same way as over the
+  cable, under the feature report id Windows lists for them (Bluetooth numbers its reports; the
+  cable doesn't). If one answers, it shows up with its product's settings, named "(Bluetooth)".
+  Untested: no Bluetooth Razer mouse here (#10, #51).
+- `secbird report` lists the feature reports each interface declares (`feature 5:90` = report
+  id 5, 90 bytes), and the report id a device answered under.
+- Mouse Dock V2 Pro (00F1): the mouse on it shows up by name ("Naga V3 Pro on Mouse Dock V2
+  Pro") with its DPI, polling rate, buttons and lighting zones, plus a Dock zone for the dock's
+  own light, the same as on the Mouse Dock Pro. Built from two reports (#61, #72, thanks
+  Skillprofi10 and Jayram2000); not tested on a V2 dock here.
+- Buttons on the Basilisk V4 HyperSpeed are named by where they are ("Side, rear (Mouse 4)",
+  "Side trigger (HyperShift)", "Underside (profile button)"), with a line on where to find each
+  one (#71, thanks lukethehawk). Other mice keep the generic names.
+
+### Fixed
+- A mouse on a mouse dock gets its mouse picture in the device list, not the dock's.
+- Buttons: "Play a macro…" is offered only on devices with macro memory. Before, it showed on
+  every mouse and pointed to a Macros section that devices without macro memory don't have
+  (#67, thanks FRNVR). Picking it before any macro is made now opens the Macros section.
+- Lights when away: a device that misses the write that dims it is tried again every 3 s for
+  30 s, instead of staying lit the whole time you're away. The log names devices that don't
+  answer, going away and coming back (#68, thanks lukethehawk).
+- Basilisk V4 HyperSpeed lighting: one zone, the underglow (LED 10), instead of logo and scroll
+  zones that did nothing. Reactive and Starlight are left out on it: the mouse accepts them but
+  doesn't run them (#69, thanks lukethehawk). Devices can now list effects they don't run; a
+  saved profile with one shows Static and skips it.
+
+## [0.5.0] - 2026-10-27
+
+### Added
+- Lights when away: while the PC is locked or its screen is off, the lights dim to a quarter or
+  turn off, and come back when you return (Settings → Lights when away; #48, thanks a3k7dotmd).
+  Nothing is saved on the devices, so a replug brings the normal lights back. Devices with the
+  older lighting commands stay lit. Tested on the Basilisk V3.
+- Gaming mode on keyboards and keypads: block the Windows key, Alt+Tab and Alt+F4 (the new Gaming
+  section, or `secbird gaming win,alt-tab`). It's saved per profile, so a profile tied to a game
+  turns it on while you play. The keyboard does the blocking, the way Synapse asks it to; the
+  section shows only on keyboards that answer for it. Not tested on a keyboard yet.
+- Save to mouse: Buttons → Saved on the mouse writes a profile's button remaps into the mouse's
+  on-board memory, so they work without Secretarybird (another PC, Linux, macOS, before the tray
+  starts) and survive sleep. What the mouse held before is kept, and "Put back what the mouse
+  had" restores it; Restore all puts it back too. Remaps stay live-only until you click, and
+  switching profiles never writes the mouse's memory (`secbird button save-to-mouse`,
+  `secbird button put-back`). Tested on the Basilisk V3.
+- Keyboard key remapping: the Keys section in the editor (click a key on the drawing, Normal and
+  HyperShift layers), or `secbird key capslock key:esc` (`secbird key` lists them; `reset`,
+  `restore-all`, `--hypershift`). Same actions as mouse buttons, saved per profile, and the tray
+  sends them on a profile switch. It uses the keyboard's own remap commands, so it works on boards
+  that take them: confirmed on the Huntsman V3 Pro and BlackWidow V4 75% (#45, #39). Older boards
+  such as the BlackWidow Chroma V2, Ornata V3 X and Reclusa X Mini don't, and the editor says
+  remapping isn't supported there yet; a remap done by Secretarybird itself is planned (#49, #58,
+  #59). `secbird report` shows whether a keyboard answers.
+- Boards whose lights aren't mapped are drawn by size in Keys: 75% and 65% boards get their own
+  drawing instead of a full-size one (#39).
+- A Tab button next to Ctrl, Shift, Alt and Win when setting a key, for shortcuts the page can't
+  catch: click Tab, then Alt, for Alt+Tab (#51, thanks LukeSz03).
+
+### Fixed
+- Effects on older keyboards (the BlackWidow Chroma V2 and others on the older lighting commands)
+  fell back to a static colour. Spectrum, wave, breathing, reactive and starlight are now sent the
+  way openrazer sends them (#49, thanks liuzhong-xin). Confirmed on the Chroma V2.
+- With no device the editor could control, every Settings and Help button failed with "invalid
+  argument" (the device report included) (#51).
+- A mouse or keyboard connected over Bluetooth shows as "DeathAdder V2 Pro (Bluetooth)" and so
+  on, with "use the cable or the USB receiver", instead of "Unknown model". Bluetooth can't be
+  controlled yet (#51, #10).
+- The Basilisk V3 Pro and V4 Pro were missing their underglow. It's now a lighting zone, on the
+  Mouse Dock Pro too (#57, thanks Xnmk029; #54, thanks Vojtasanko).
+
+### Changed
+- The Reclusa X Mini 65% (02E3) is known by name (#53).
+- 02EA is the Huntsman V3 HE TKL (#50, thanks Toru1475).
+- The Basilisk V4 Pro's button 128 is the extra side button, not a top button (#54, thanks
+  Vojtasanko). It's now `side-extra`; remaps saved as `top-extra` move over by themselves.
+
+## [0.4.12] - 2026-10-24
+
+### Added
+- Mouse Dock Pro: the dock's own light is a lighting zone, "Dock" (#39, thanks esperianterra).
+  Static colour, spectrum, wave and breathing are confirmed on a real dock; reactive and starlight
+  showed nothing there, so they aren't offered. The dock can also show the docked mouse's
+  battery, green to red, updated every 5 minutes; the dock doesn't have Synapse's battery effect
+  built in.
+
+### Fixed
+- Per-key colours still went dark after quick adjustment mode on the Huntsman V3 Pro (#45). The
+  keyboard doesn't say when it leaves that mode, so the tray now sends the per-key colours of
+  wired keyboards and keypads again every 3 seconds, as Synapse keeps doing. It pauses while the
+  light finder is open. Wireless boards are left out, so they can still sleep. The 0.4.11 change
+  that saved the per-key effect on the keyboard is undone: it didn't help, and without the tray
+  it could leave the keyboard dark after a power cycle.
+- Huntsman V3 Pro per-key layout from the light-finder list (#45, #27, thanks Skillprofi10).
+  Painting numpad `.` lit the volume dial. The media keys and the dial are now in the editor.
+- Blade laptops set to "Keyboard when idle: stays lit" still faded by themselves (#34, thanks
+  garyh-2). Any read restarts that fade, so the tray reads the setting back every 3 seconds. This
+  only works while the tray runs.
+- `secbird report` dropped zero bytes at the end of short replies, so smart dimming's `01 00 00`
+  showed as `01` (#34).
+
+## [0.4.11] - 2026-10-23
+
+### Added
+- Per-key colours: a "Find which light is which key" mode. It lights one light at a time; you type
+  the key that lit up and copy the list into an issue, so boards whose layout is wrong or unknown
+  can be mapped (#45, #27, #41). Nothing is saved on the device, and your lighting comes back when
+  you leave.
+
+### Fixed
+- Per-key colours went dark after leaving quick adjustment mode on the Huntsman V3 Pro. The per-key
+  effect is now also saved to the keyboard, as the single backlight colour already was (#45, #27,
+  thanks Skillprofi10). Not tested on the keyboard yet.
+- DeathStalker V2: Numpad 0 lit nothing after the 0.4.9 layout shift (#41, thanks a3k7dotmd).
+
+## [0.4.10] - 2026-10-22
+
+### Added
+- Naga V2 Pro: the side grid and the profile light underneath are their own zones (#13, thanks
+  Wastelander121).
+- Per-key colours: a layout picker with UK (ISO) and German (QWERTZ) beside US. ISO boards get
+  their key left of Z and the one left of Enter, and lose the backslash key they don't have (#45,
+  thanks Skillprofi10).
+
+### Fixed
+- Wireless mice lost their button remaps after sleeping until the profile was switched (#45).
+  The tray checks one remapped button every 20 seconds and sends the remaps again if they're gone.
+- Tartarus V2: colour and brightness changes did nothing. It uses the newer lighting commands, not
+  the older ones the device list had (#46, thanks fen0z).
+
+## [0.4.9] - 2026-10-21
+
+### Added
+- Mouse Dock Pro test (#39): `secbird report` also asks the dock itself for its firmware,
+  lighting and pairing settings, and `secbird dock-test red|spectrum|battery|off` tries setting
+  the dock's own light once. Both follow Synapse's dock code and haven't been tried on a dock yet.
+- `secbird report` shows whether a mouse has sensor rotation in its firmware.
+
+### Fixed
+- DeathStalker V2 (Pro, wired and wireless): per-key colours lit the key to the right of the one
+  painted, and the leftmost key of each row couldn't be coloured (#41, thanks a3k7dotmd). The
+  DeathStalker V2 Pro TKL gets the same correction and now shows a keyboard layout; not confirmed
+  on that board yet.
+
+## [0.4.8] - 2026-10-20
+
+### Added
+- Viper V4 Pro and Huntsman V3 HE (#36, thanks Toru1475).
+- Naga V3 Pro: the 12-button side plate's light is its own zone, "Side plate" (#26, thanks
+  Skillprofi10).
+- `secbird report` shows which on-board slot is active.
+
+### Fixed
+- Colours, effects and brightness now go to the device's active on-board slot. A keyboard or
+  mouse that Synapse left on slot 2 read the changes back but never showed them (#37, thanks
+  a3k7dotmd).
+- Turning sleep off now lasts past a power cycle: it is saved on the device too (#37).
+- A wireless device that sleeps until its first keypress after Windows starts still gets its
+  profile: the tray keeps looking for it once a minute for half an hour (#37). Until then it's
+  listed as "Asleep? Press a key or move it".
+- Restoring a backup on another PC puts the profiles on the mouse connected there. They went to
+  the other PC's mouse (matched by serial number) and never showed up (#40, thanks Rubyurek).
+- Laptops that answer a blank serial number show "none" in the report instead of garbage.
+
+## [0.4.7] - 2026-10-19
+
+### Added
+- BlackWidow V4 Low-Profile HyperSpeed on the cable (#31, thanks lukethehawk). The wireless one
+  is now named "(Wireless)" so the two read apart when both are connected.
+
+### Fixed
+- Keyboards no longer show a "0 DPI" control (#32, thanks lukethehawk). Only mice have DPI.
+
+## [0.4.6] - 2026-10-18
+
+### Added
+- Pick your own low battery warning level: Settings → Low battery warning takes any level from
+  1% to 95% (it was always 15%). Type it, or use − and +.
+- All devices is easier to read: bigger cards grouped by kind (mice, keyboards and keypads,
+  headsets, everything else), each with an icon for its kind, and DPI, polling rate and battery
+  at a glance. Long device names no longer get cut off.
+- BlackWidow V4 Low-Profile HyperSpeed (#28, thanks lukethehawk). Verified over 2.4 GHz.
+
 ## [0.4.5] - 2026-10-17
 
 ### Added

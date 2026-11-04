@@ -19,6 +19,7 @@ pub mod device;
 pub mod effects;
 pub mod error;
 pub mod firmware;
+pub mod hid_descriptor;
 pub mod features;
 pub mod log;
 pub mod macros;
@@ -33,7 +34,7 @@ pub mod update;
 pub use db::{Db, DeviceSpec, Kind, Lighting, Matrix};
 pub use device::{discover, Device};
 pub use error::{Error, Result};
-pub use features::{Dimming, DpiStages, Rgb, SleepTimer};
+pub use features::{Dimming, DpiStages, GameMode, Rgb, SleepTimer};
 pub use profile::{Profile, Store, Zone};
 pub use transport::Transport;
 

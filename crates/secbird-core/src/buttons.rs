@@ -55,12 +55,14 @@ pub const BUTTONS: &[(u8, &str, &str)] = &[
     (104, "scroll-left", "Scroll left"),
     (105, "scroll-right", "Scroll right"),
     (106, "wheel-mode", "Wheel mode button"),
-    // Basilisk V4 Pro: the third button on top, Synapse's "AI Prompt Master" (#16).
-    (128, "top-extra", "Extra top button"),
+    // Basilisk V4 Pro: the extra side button, Synapse's "AI Prompt Master" (#16, #54). Named
+    // top-extra until 0.5; profiles saved with that name still find it.
+    (128, "side-extra", "Extra side button"),
 ];
 
 /// The id of a button name; buttons not in [`BUTTONS`] are named `button-<id>`.
 pub fn button_id(name: &str) -> Option<u8> {
+    let name = if name == "top-extra" { "side-extra" } else { name };
     BUTTONS.iter().find(|b| b.1 == name).map(|b| b.0).or_else(|| name.strip_prefix("button-")?.parse().ok())
 }
 
@@ -78,7 +80,174 @@ pub enum Layer {
     HyperShift = 1,
 }
 
-/// Profile key of a button on a layer: `side-forward`, or `side-forward/hypershift`.
+/// Keyboard keys: (position id, name used in profiles and the CLI, label, USB usage). The
+/// ids are the IBM PC key position numbers Synapse uses for keyboards (its `analogKeyID`
+/// table); the usage is what the key types out of the box.
+pub const KEYS: &[(u8, &str, &str, u8)] = &[
+    (1, "grave", "` (left of 1)", 0x35),
+    (2, "1", "1", 0x1E),
+    (3, "2", "2", 0x1F),
+    (4, "3", "3", 0x20),
+    (5, "4", "4", 0x21),
+    (6, "5", "5", 0x22),
+    (7, "6", "6", 0x23),
+    (8, "7", "7", 0x24),
+    (9, "8", "8", 0x25),
+    (10, "9", "9", 0x26),
+    (11, "0", "0", 0x27),
+    (12, "minus", "-", 0x2D),
+    (13, "equal", "=", 0x2E),
+    (14, "yen", "Yen (Japanese)", 0x89),
+    (15, "backspace", "Backspace", 0x2A),
+    (16, "tab", "Tab", 0x2B),
+    (17, "q", "Q", 0x14),
+    (18, "w", "W", 0x1A),
+    (19, "e", "E", 0x08),
+    (20, "r", "R", 0x15),
+    (21, "t", "T", 0x17),
+    (22, "y", "Y", 0x1C),
+    (23, "u", "U", 0x18),
+    (24, "i", "I", 0x0C),
+    (25, "o", "O", 0x12),
+    (26, "p", "P", 0x13),
+    (27, "lbracket", "[", 0x2F),
+    (28, "rbracket", "]", 0x30),
+    (29, "backslash", "\\", 0x31),
+    (30, "capslock", "Caps Lock", 0x39),
+    (31, "a", "A", 0x04),
+    (32, "s", "S", 0x16),
+    (33, "d", "D", 0x07),
+    (34, "f", "F", 0x09),
+    (35, "g", "G", 0x0A),
+    (36, "h", "H", 0x0B),
+    (37, "j", "J", 0x0D),
+    (38, "k", "K", 0x0E),
+    (39, "l", "L", 0x0F),
+    (40, "semicolon", ";", 0x33),
+    (41, "quote", "'", 0x34),
+    (42, "iso-hash", "# (ISO, left of Enter)", 0x32),
+    (43, "enter", "Enter", 0x28),
+    (44, "lshift", "Left Shift", 0xE1),
+    (45, "iso-backslash", "\\ (ISO, right of Left Shift)", 0x64),
+    (46, "z", "Z", 0x1D),
+    (47, "x", "X", 0x1B),
+    (48, "c", "C", 0x06),
+    (49, "v", "V", 0x19),
+    (50, "b", "B", 0x05),
+    (51, "n", "N", 0x11),
+    (52, "m", "M", 0x10),
+    (53, "comma", ",", 0x36),
+    (54, "period", ".", 0x37),
+    (55, "slash", "/", 0x38),
+    (56, "ro", "Ro (Japanese)", 0x87),
+    (57, "rshift", "Right Shift", 0xE5),
+    (58, "lctrl", "Left Ctrl", 0xE0),
+    (60, "lalt", "Left Alt", 0xE2),
+    (61, "space", "Space", 0x2C),
+    (62, "ralt", "Right Alt", 0xE6),
+    (64, "rctrl", "Right Ctrl", 0xE4),
+    (75, "insert", "Insert", 0x49),
+    (76, "delete", "Delete", 0x4C),
+    (79, "left", "Left arrow", 0x50),
+    (80, "home", "Home", 0x4A),
+    (81, "end", "End", 0x4D),
+    (83, "up", "Up arrow", 0x52),
+    (84, "down", "Down arrow", 0x51),
+    (85, "pageup", "Page Up", 0x4B),
+    (86, "pagedown", "Page Down", 0x4E),
+    (89, "right", "Right arrow", 0x4F),
+    (90, "numlock", "Num Lock", 0x53),
+    (91, "num7", "Numpad 7", 0x5F),
+    (92, "num4", "Numpad 4", 0x5C),
+    (93, "num1", "Numpad 1", 0x59),
+    (95, "num-slash", "Numpad /", 0x54),
+    (96, "num8", "Numpad 8", 0x60),
+    (97, "num5", "Numpad 5", 0x5D),
+    (98, "num2", "Numpad 2", 0x5A),
+    (99, "num0", "Numpad 0", 0x62),
+    (100, "num-star", "Numpad *", 0x55),
+    (101, "num9", "Numpad 9", 0x61),
+    (102, "num6", "Numpad 6", 0x5E),
+    (103, "num3", "Numpad 3", 0x5B),
+    (104, "num-period", "Numpad .", 0x63),
+    (105, "num-minus", "Numpad -", 0x56),
+    (106, "num-plus", "Numpad +", 0x57),
+    (108, "num-enter", "Numpad Enter", 0x58),
+    (110, "esc", "Esc", 0x29),
+    (112, "f1", "F1", 0x3A),
+    (113, "f2", "F2", 0x3B),
+    (114, "f3", "F3", 0x3C),
+    (115, "f4", "F4", 0x3D),
+    (116, "f5", "F5", 0x3E),
+    (117, "f6", "F6", 0x3F),
+    (118, "f7", "F7", 0x40),
+    (119, "f8", "F8", 0x41),
+    (120, "f9", "F9", 0x42),
+    (121, "f10", "F10", 0x43),
+    (122, "f11", "F11", 0x44),
+    (123, "f12", "F12", 0x45),
+    (124, "printscreen", "Print Screen", 0x46),
+    (125, "scrolllock", "Scroll Lock", 0x47),
+    (126, "pause", "Pause", 0x48),
+    (127, "lwin", "Windows", 0xE3),
+    (129, "menu", "Menu", 0x65),
+    (150, "muhenkan", "Muhenkan (Japanese)", 0x8B),
+    (151, "kana", "Katakana/Hiragana (Japanese)", 0x88),
+    (154, "henkan", "Henkan (Japanese)", 0x8A),
+];
+
+/// Profile and CLI names of keys carry this prefix, so `key-left` (the arrow) and `left`
+/// (the mouse button) stay apart.
+const KEY_PREFIX: &str = "key-";
+
+/// A key's id from its name without the `key-` prefix (`capslock`, or `id57`).
+pub fn key_id(name: &str) -> Option<u8> {
+    KEYS.iter().find(|k| k.1 == name).map(|k| k.0).or_else(|| name.strip_prefix("id")?.parse().ok())
+}
+
+/// A remappable input: a mouse button or a keyboard key. Each has its own id space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Input {
+    Button(u8),
+    Key(u8),
+}
+
+impl Input {
+    /// `side-forward`, `key-capslock`; unnamed ids are `button-<id>` and `key-id<id>`.
+    pub fn parse(name: &str) -> Option<Input> {
+        match name.strip_prefix(KEY_PREFIX) {
+            Some(key) => key_id(key).map(Input::Key),
+            None => button_id(name).map(Input::Button),
+        }
+    }
+
+    pub fn name(self) -> String {
+        match self {
+            Input::Button(id) => button_name(id),
+            Input::Key(id) => {
+                let name = KEYS.iter().find(|k| k.0 == id).map_or_else(|| format!("id{id}"), |k| k.1.to_string());
+                format!("{KEY_PREFIX}{name}")
+            }
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Input::Button(id) => button_label(id),
+            Input::Key(id) => KEYS.iter().find(|k| k.0 == id).map_or_else(|| format!("Key {id}"), |k| k.2.to_string()),
+        }
+    }
+
+    /// The assignment command, its size and the id it carries.
+    fn command(self) -> (crate::proto::Command, u8, u8) {
+        match self {
+            Input::Button(id) => (cmd::BUTTON, cmd::BUTTON_SIZE, id),
+            Input::Key(id) => (cmd::KEY, cmd::KEY_SIZE, id),
+        }
+    }
+}
+
+/// Profile key of a button or key on a layer: `side-forward`, `key-capslock/hypershift`.
 pub fn setting_key(button: &str, layer: Layer) -> String {
     match layer {
         Layer::Normal => button.to_string(),
@@ -86,14 +255,14 @@ pub fn setting_key(button: &str, layer: Layer) -> String {
     }
 }
 
-/// Inverse of [`setting_key`]: `(button id, layer)`.
-pub fn parse_setting_key(key: &str) -> Result<(u8, Layer)> {
+/// Inverse of [`setting_key`]: `(input, layer)`.
+pub fn parse_setting_key(key: &str) -> Result<(Input, Layer)> {
     let (name, layer) = match key.strip_suffix("/hypershift") {
         Some(name) => (name, Layer::HyperShift),
         None => (key, Layer::Normal),
     };
-    let id = button_id(name).ok_or_else(|| Error::InvalidArg(format!("unknown button '{name}'")))?;
-    Ok((id, layer))
+    let input = Input::parse(name).ok_or_else(|| Error::InvalidArg(format!("unknown button or key '{name}'")))?;
+    Ok((input, layer))
 }
 
 /// What a button does.
@@ -558,40 +727,111 @@ impl FromStr for Action {
 }
 
 impl Device {
-    fn read_button(&self, slot: u8, id: u8, layer: Layer) -> Result<Action> {
-        let r = self.get(cmd::BUTTON, cmd::BUTTON_SIZE, &[slot, id, layer as u8])?;
+    fn read_input(&self, slot: u8, input: Input, layer: Layer) -> Result<Action> {
+        let (command, size, id) = input.command();
+        let r = self.get(command, size, &[slot, id, layer as u8])?;
         let a = r.args();
         Ok(Action::decode(a[3], [a[5], a[6], a[7], a[8], a[9]]))
     }
 
+    /// What a button or key does right now (the live slot).
+    pub fn input(&self, input: Input, layer: Layer) -> Result<Action> {
+        self.read_input(cmd::BUTTON_LIVE_SLOT, input, layer)
+    }
+
+    /// What a button or key does in the active saved slot: Synapse's or the factory setting.
+    pub fn saved_input(&self, input: Input, layer: Layer) -> Result<Action> {
+        let slot = self.get(cmd::ACTIVE_SLOT, 1, &[]).map(|r| r.args()[0]).unwrap_or(1).max(1);
+        self.read_input(slot, input, layer)
+    }
+
+    /// Set a button or key in the live slot. Returns whether anything was sent: an
+    /// unchanged one is left alone.
+    pub fn set_input(&self, input: Input, layer: Layer, action: Action) -> Result<bool> {
+        if self.input(input, layer).ok() == Some(action) {
+            return Ok(false);
+        }
+        let (command, size, id) = input.command();
+        let (function, data_size, data) = action.encode();
+        let mut args = vec![cmd::BUTTON_LIVE_SLOT, id, layer as u8, function, data_size];
+        args.extend_from_slice(&data);
+        self.transact(command, size, &args)?;
+        Ok(true)
+    }
+
+    /// What a button or key does in on-board slot `slot` (1-5).
+    pub fn slot_input(&self, slot: u8, input: Input, layer: Layer) -> Result<Action> {
+        self.read_input(slot, input, layer)
+    }
+
+    /// Write a button or key into on-board slot `slot` (1-5), which the device keeps
+    /// without any software ("Save to mouse"). A flash write: only on request, never on a
+    /// profile switch.
+    pub fn set_slot_input(&self, slot: u8, input: Input, layer: Layer, action: Action) -> Result<()> {
+        if !(1..=5).contains(&slot) {
+            return Err(Error::InvalidArg(format!("on-board slot {slot}: use 1 to 5")));
+        }
+        if self.slot_input(slot, input, layer).ok() == Some(action) {
+            return Ok(());
+        }
+        let (command, size, id) = input.command();
+        let (function, data_size, data) = action.encode();
+        let mut args = vec![slot, id, layer as u8, function, data_size];
+        args.extend_from_slice(&data);
+        self.transact_slow(command, size, &args)?;
+        Ok(())
+    }
+
+    /// Put a button or key back to its saved-slot setting.
+    pub fn reset_input(&self, input: Input, layer: Layer) -> Result<bool> {
+        let saved = self.saved_input(input, layer)?;
+        self.set_input(input, layer, saved)
+    }
+
     /// What a button does right now (the live slot).
     pub fn button(&self, id: u8, layer: Layer) -> Result<Action> {
-        self.read_button(cmd::BUTTON_LIVE_SLOT, id, layer)
+        self.input(Input::Button(id), layer)
     }
 
     /// What a button does in the active saved slot: Synapse's or the factory setting.
     pub fn saved_button(&self, id: u8, layer: Layer) -> Result<Action> {
-        let slot = self.get(cmd::ACTIVE_SLOT, 1, &[]).map(|r| r.args()[0]).unwrap_or(1).max(1);
-        self.read_button(slot, id, layer)
+        self.saved_input(Input::Button(id), layer)
     }
 
-    /// Set a button in the live slot. Returns whether anything was sent: an unchanged
-    /// button is left alone.
+    /// See [`Device::set_input`].
     pub fn set_button(&self, id: u8, layer: Layer, action: Action) -> Result<bool> {
-        if self.button(id, layer).ok() == Some(action) {
-            return Ok(false);
-        }
-        let (function, size, data) = action.encode();
-        let mut args = vec![cmd::BUTTON_LIVE_SLOT, id, layer as u8, function, size];
-        args.extend_from_slice(&data);
-        self.transact(cmd::BUTTON, cmd::BUTTON_SIZE, &args)?;
-        Ok(true)
+        self.set_input(Input::Button(id), layer, action)
+    }
+
+    /// What a button does in on-board slot `slot` (1-5).
+    pub fn slot_button(&self, slot: u8, id: u8, layer: Layer) -> Result<Action> {
+        self.slot_input(slot, Input::Button(id), layer)
+    }
+
+    /// See [`Device::set_slot_input`].
+    pub fn set_slot_button(&self, slot: u8, id: u8, layer: Layer, action: Action) -> Result<()> {
+        self.set_slot_input(slot, Input::Button(id), layer, action)
     }
 
     /// Put a button back to its saved-slot setting.
     pub fn reset_button(&self, id: u8, layer: Layer) -> Result<bool> {
-        let saved = self.saved_button(id, layer)?;
-        self.set_button(id, layer, saved)
+        self.reset_input(Input::Button(id), layer)
+    }
+
+    /// Keys this keyboard lets us remap, with their current (live, normal-layer) action:
+    /// every key in [`KEYS`] that answers a read. Empty for anything that isn't a keyboard,
+    /// keypad or laptop, or that doesn't answer key reads (Synapse remaps keyboards in
+    /// software, so many may not). Asks about each key; takes a moment.
+    pub fn keys(&self) -> Vec<(u8, Action)> {
+        use crate::Kind;
+        if !matches!(self.spec.as_ref().map(|s| s.kind), Some(Kind::Keyboard | Kind::Keypad | Kind::Laptop)) {
+            return Vec::new();
+        }
+        // One key that every layout has: if A doesn't answer, nothing will.
+        if self.input(Input::Key(31), Layer::Normal).is_err() {
+            return Vec::new();
+        }
+        KEYS.iter().filter_map(|k| self.input(Input::Key(k.0), Layer::Normal).ok().map(|a| (k.0, a))).collect()
     }
 
     /// Button ids the mouse says it has (Synapse's "Get Button ID list"), in [`BUTTONS`]
@@ -683,7 +923,8 @@ mod tests {
         assert_eq!("forward".parse::<Action>().unwrap().encode(), (1, 1, [5, 0, 0, 0, 0]));
         // Synapse stores a lone Alt as the key E2, not as a modifier bit (#16).
         assert_eq!(Action::decode(2, [0, 0xE2, 0, 0, 0]).to_string(), "key:alt");
-        assert_eq!(button_label(128), "Extra top button");
+        assert_eq!(button_label(128), "Extra side button");
+        assert_eq!(button_id("top-extra"), Some(128));
     }
 
     #[test]
@@ -696,8 +937,8 @@ mod tests {
     #[test]
     fn setting_keys() {
         assert_eq!(setting_key("sniper", Layer::HyperShift), "sniper/hypershift");
-        assert_eq!(parse_setting_key("sniper/hypershift").unwrap(), (15, Layer::HyperShift));
-        assert_eq!(parse_setting_key("side-forward").unwrap(), (5, Layer::Normal));
+        assert_eq!(parse_setting_key("sniper/hypershift").unwrap(), (Input::Button(15), Layer::HyperShift));
+        assert_eq!(parse_setting_key("side-forward").unwrap(), (Input::Button(5), Layer::Normal));
         assert!(parse_setting_key("elbow").is_err());
     }
 }

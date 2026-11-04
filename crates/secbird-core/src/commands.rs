@@ -92,6 +92,11 @@ pub const AUTO_SLEEP_SIZE: u8 = 0x02;
 /// `[profile 1, enabled, level]`).
 pub const SMART_DIMMING: Command = Command::new(0x07, 0x13);
 pub const SMART_DIMMING_SIZE: u8 = 0x03;
+/// Keyboards: gaming mode, `[bits, ...]` (Synapse's "Game Mode State"; reply `[bits, key
+/// cover, lifted, 0]`). Bits from Synapse's `getGameModeBit`: 1 on, 4 Windows key, 8 Alt+Tab,
+/// 16 Alt+F4 blocked.
+pub const GAME_MODE: Command = Command::new(0x00, 0x08);
+pub const GAME_MODE_SIZE: u8 = 0x04;
 
 /// Battery level: reply `[_, level 0..=255]`.
 pub const BATTERY: Command = Command::new(0x07, 0x00);
@@ -149,6 +154,19 @@ pub const BUTTON_SIZE: u8 = 0x50;
 /// The button ids the mouse has (Synapse "Get Button ID list"): `[count, id...]`.
 pub const BUTTON_IDS: Command = Command::new(0x02, 0x04);
 pub const BUTTON_IDS_SIZE: u8 = 0x50;
+/// What one keyboard key does: `[slot, key, layer, function, size, data0..data4]`, size 0x50,
+/// the same layout as [`BUTTON`] (Synapse's `setSingleKeyAssignment`). Key ids are the
+/// position numbers in [`crate::buttons::KEYS`]. Synapse 4 defines it but remaps keyboards
+/// in software, so no keyboard has been seen to take it yet.
+pub const KEY: Command = Command::new(0x02, 0x0D);
+pub const KEY_SIZE: u8 = 0x50;
+/// The key ids a keyboard has (Synapse "Get Key Assignment List"): request `[slot, layer,
+/// offset]`, reply `[slot, layer, ids...]`. GET only; what the request bytes mean is a guess.
+pub const KEY_IDS: Command = Command::new(0x02, 0x8F);
+/// Sensor rotation in firmware (Synapse "Proximity Sensor Angle Tune"): `[store, enabled, angle]`.
+/// Only newer mice have it; Synapse rotates in software on the rest.
+pub const SENSOR_ANGLE: Command = Command::new(0x0B, 0x14);
+pub const SENSOR_ANGLE_SIZE: u8 = 0x03;
 /// Button slot 0 is live and unsaved, and wins over the saved profile slots 1-5.
 /// Verified (Basilisk V3): a remap in slot 0 took effect while slot 1 was active.
 pub const BUTTON_LIVE_SLOT: u8 = 0x00;

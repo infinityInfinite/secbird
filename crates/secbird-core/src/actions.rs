@@ -56,6 +56,12 @@ pub fn set_dimming(dev: &Device, store: &mut Store, dimming: crate::Dimming) -> 
     store.save()
 }
 
+pub fn set_game_mode(dev: &Device, store: &mut Store, mode: crate::GameMode) -> Result<()> {
+    dev.set_game_mode(mode)?;
+    store.for_device(dev).active_mut().game_mode = Some(mode.to_string());
+    store.save()
+}
+
 pub fn set_auto_sleep(dev: &Device, store: &mut Store, enabled: bool) -> Result<()> {
     dev.set_auto_sleep(enabled)?;
     store.for_device(dev).active_mut().auto_sleep = Some(enabled);
@@ -122,8 +128,21 @@ pub fn set_keys(dev: &Device, store: &mut Store, keys: Vec<Rgb>) -> Result<()> {
     store.save()
 }
 
-/// Remap a button (`None` puts back its saved setting). `button` is a name from
-/// [`crate::buttons::BUTTONS`].
+/// Light one matrix cell white and the rest off, so a user can say which key it is
+/// (finding a board's layout, #45). Nothing is saved; apply the profile again afterwards.
+pub fn show_light(dev: &Device, store: &mut Store, row: u8, col: u8) -> Result<()> {
+    check_lighting(dev, store)?;
+    let m = dev.matrix().ok_or_else(|| crate::error::Error::Unsupported("no per-key lighting".into()))?;
+    if row >= m.rows || col >= m.cols {
+        return Err(crate::error::Error::InvalidArg(format!("light {row},{col} outside {}x{}", m.rows, m.cols)));
+    }
+    let mut frame = vec![Rgb(0, 0, 0); m.rows as usize * m.cols as usize];
+    frame[row as usize * m.cols as usize + col as usize] = Rgb(255, 255, 255);
+    dev.show_frame(&frame)
+}
+
+/// Remap a button or key (`None` puts back its saved setting). `button` is a name from
+/// [`crate::buttons::BUTTONS`], or `key-` and a name from [`crate::buttons::KEYS`].
 pub fn set_button(
     dev: &Device,
     store: &mut Store,
@@ -132,19 +151,19 @@ pub fn set_button(
     action: Option<crate::buttons::Action>,
 ) -> Result<()> {
     let key = crate::buttons::setting_key(button, layer);
-    let (id, _) = crate::buttons::parse_setting_key(&key)?;
-    if let Some(action) = action {
+    let (input, _) = crate::buttons::parse_setting_key(&key)?;
+    if let (Some(action), crate::buttons::Input::Button(id)) = (action, input) {
         keeps_a_left_click(dev, id, layer, action)?;
     }
-    let buttons = &mut store.for_device(dev).active_mut().buttons;
+    let profiles = store.for_device(dev);
     match action {
         Some(action) => {
-            dev.set_button(id, layer, action)?;
-            buttons.insert(key, action.to_string());
+            dev.set_input(input, layer, action)?;
+            profiles.active_mut().buttons.insert(key, action.to_string());
         }
         None => {
-            dev.reset_button(id, layer)?;
-            buttons.remove(&key);
+            profiles.reset_button(&key, dev)?;
+            profiles.active_mut().buttons.remove(&key);
         }
     }
     store.save()
@@ -168,13 +187,17 @@ fn keeps_a_left_click(dev: &Device, id: u8, layer: crate::buttons::Layer, action
 
 /// Put every remapped button of the active profile back to what the mouse stores (Synapse's
 /// or the factory setting), on both layers, and forget the remaps so they aren't applied
-/// again. Returns how many buttons were restored.
+/// again. A "Save to mouse" is put back first, so this is a full way back. Returns how many
+/// buttons were restored.
 pub fn restore_all_buttons(dev: &Device, store: &mut Store) -> Result<usize> {
+    if store.for_device(dev).onboard.is_some() {
+        put_back_onboard(dev, store)?;
+    }
     let keys: Vec<String> = store.for_device(dev).active().buttons.keys().cloned().collect();
     let mut restored = 0;
     let mut first_error = None;
     for key in keys {
-        match crate::buttons::parse_setting_key(&key).and_then(|(id, layer)| dev.reset_button(id, layer)) {
+        match crate::buttons::parse_setting_key(&key).and_then(|(input, layer)| dev.reset_input(input, layer)) {
             Ok(_) => {
                 store.for_device(dev).active_mut().buttons.remove(&key);
                 restored += 1;
@@ -189,6 +212,62 @@ pub fn restore_all_buttons(dev: &Device, store: &mut Store) -> Result<usize> {
         Some(e) if restored == 0 => Err(e),
         _ => Ok(restored),
     }
+}
+
+/// "Save to mouse": the active profile's button remaps go into the mouse's active on-board
+/// slot, so they work without Secretarybird. What each button held there before is kept
+/// first (once, so it stays Synapse's or the factory setting), and buttons an earlier save
+/// wrote that this profile doesn't remap go back to it. Returns the slot written.
+pub fn save_buttons_to_mouse(dev: &Device, store: &mut Store) -> Result<u8> {
+    if dev.buttons().is_empty() {
+        return Err(crate::error::Error::Unsupported(format!("{} keeps no button settings on board", dev.name())));
+    }
+    let slot = dev.saved_slot();
+    if store.for_device(dev).onboard.as_ref().is_some_and(|o| o.slot != slot) {
+        put_back_onboard(dev, store)?;
+    }
+    let profiles = store.for_device(dev);
+    let want = profiles.active().buttons.clone();
+    let mut save = profiles.onboard.clone().unwrap_or_default();
+    // The backup goes to disk before anything is written to the mouse.
+    for key in want.keys() {
+        if !save.before.contains_key(key) {
+            let (input, layer) = crate::buttons::parse_setting_key(key)?;
+            save.before.insert(key.clone(), dev.slot_input(slot, input, layer)?.to_string());
+        }
+    }
+    save.slot = slot;
+    profiles.onboard = Some(save.clone());
+    store.save()?;
+
+    for (key, original) in save.before.iter().filter(|(k, _)| !want.contains_key(*k)) {
+        let (input, layer) = crate::buttons::parse_setting_key(key)?;
+        dev.set_slot_input(slot, input, layer, original.parse()?)?;
+    }
+    for (key, action) in &want {
+        let (input, layer) = crate::buttons::parse_setting_key(key)?;
+        dev.set_slot_input(slot, input, layer, action.parse()?)?;
+    }
+    let profiles = store.for_device(dev);
+    save.before.retain(|k, _| want.contains_key(k));
+    save.profile = profiles.active.clone();
+    save.buttons = want;
+    profiles.onboard = Some(save);
+    store.save()?;
+    Ok(slot)
+}
+
+/// Undo "Save to mouse": the on-board slot gets back what it held before. The live remaps
+/// stay as they are. Returns how many buttons were put back.
+pub fn put_back_onboard(dev: &Device, store: &mut Store) -> Result<usize> {
+    let Some(save) = store.for_device(dev).onboard.clone() else { return Ok(0) };
+    for (key, original) in &save.before {
+        let (input, layer) = crate::buttons::parse_setting_key(key)?;
+        dev.set_slot_input(save.slot, input, layer, original.parse()?)?;
+    }
+    store.for_device(dev).onboard = None;
+    store.save()?;
+    Ok(save.before.len())
 }
 
 /// One zone's outcome from [`sync_color`].

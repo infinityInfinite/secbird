@@ -45,12 +45,37 @@ pub struct TraySettings {
     /// No notification when a wireless device runs low.
     #[serde(default)]
     pub battery_warning_off: bool,
+    /// Battery percent at or below which that notification shows; `None` is the default.
+    #[serde(default)]
+    pub battery_warning_at: Option<u8>,
     /// Don't switch profiles when a program tied to one comes to the front.
     #[serde(default)]
     pub auto_switch_off: bool,
+    /// What the lights do while the PC is locked or its screen is off (#48): "dim", "off",
+    /// or left as they are when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away_lights: Option<String>,
 }
 
+/// Choices for [`TraySettings::away_lights`], with the percent of the saved brightness.
+pub const AWAY_LIGHTS: [(&str, u8); 2] = [("dim", 25), ("off", 0)];
+
+/// Low battery levels a person can pick, and the default.
+pub const BATTERY_RANGE: std::ops::RangeInclusive<u8> = 1..=95;
+pub const BATTERY_DEFAULT: u8 = 15;
+
 impl TraySettings {
+    /// The low battery level, falling back to the default for a missing or hand-edited value.
+    pub fn low_battery(&self) -> u8 {
+        self.battery_warning_at.filter(|v| BATTERY_RANGE.contains(v)).unwrap_or(BATTERY_DEFAULT)
+    }
+
+    /// Brightness, in percent of the saved level, for the lights while away; `None` leaves them.
+    pub fn away_percent(&self) -> Option<u8> {
+        let want = self.away_lights.as_deref()?;
+        AWAY_LIGHTS.iter().find(|(name, _)| *name == want).map(|(_, pct)| *pct)
+    }
+
     pub fn path() -> std::path::PathBuf {
         config_dir().join("tray.json")
     }

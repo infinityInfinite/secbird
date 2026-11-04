@@ -1,6 +1,6 @@
-use crate::engine::{ApplyReport, Battery, Engine};
+use crate::engine::{ApplyReport, Battery, Engine, LightsRetry, DIM_FOR, RELIGHT_FOR};
 use secbird_core::log;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use crate::settings::{autostart_enabled, open_config_folder, set_autostart, TraySettings};
 use crate::{apps, osd, server};
 use std::ffi::CString;
@@ -12,9 +12,13 @@ use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Power::{RegisterPowerSettingNotification, POWERBROADCAST_SETTING};
+use windows_sys::Win32::System::RemoteDesktop::{WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION};
+use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows_sys::Win32::UI::Shell::*;
@@ -41,10 +45,13 @@ const TIMER_RESCAN: usize = 1;
 /// Extra rescans after start and wake: devices often answer late at boot.
 const TIMER_RETRY: usize = 2;
 const RETRY_DELAYS_MS: [u32; 3] = [4_000, 15_000, 45_000];
+/// After those, a wireless device that sleeps until its first keypress gets looked for
+/// once a minute for half an hour, so it still gets its profile (#37).
+const SLEEPER_RETRY_MS: u32 = 60_000;
+const SLEEPER_RETRIES: usize = 30;
 /// Battery check for wireless devices (cheap: two short USB requests per device).
 const TIMER_BATTERY: usize = 3;
 const BATTERY_MS: u32 = 5 * 60 * 1000;
-const LOW_BATTERY: u8 = 15;
 /// Devices need a moment after arrival or resume before they answer reliably.
 const SETTLE_MS: u32 = 1500;
 /// Wait for the window in front to settle, so Alt+Tab through several windows sends
@@ -58,6 +65,16 @@ const FIRMWARE_TIMER_MS: u32 = 6 * 60 * 60 * 1000;
 const FIRMWARE_FIRST_MS: u32 = 2 * 60 * 1000;
 const FIRMWARE_EVERY_SECS: u64 = 7 * 24 * 60 * 60;
 const UPDATE_EVERY_SECS: u64 = 24 * 60 * 60;
+/// Wireless mice forget their button remaps when they sleep (#45): one button is read
+/// back this often and the remaps re-sent if it changed, at most once a minute each.
+const TIMER_BUTTONS: usize = 6;
+const BUTTONS_MS: u32 = 20_000;
+const BUTTONS_AGAIN_SECS: u64 = 60;
+/// Per-key colors of wired keyboards sent again this often: quick adjustment mode drops
+/// them without saying (#45), so this is how long they can stay dark after it. Laptops
+/// set to stay lit get a read on the same beat (#34).
+const TIMER_LIGHTS: usize = 7;
+const LIGHTS_MS: u32 = 3_000;
 
 const ID_REAPPLY: u32 = 1;
 const ID_FOLDER: u32 = 2;
@@ -97,6 +114,8 @@ struct App {
     /// Devices already warned about low battery (cleared once charging or recovered).
     low_battery: HashSet<String>,
     batteries: Vec<Battery>,
+    /// When each mouse last got its lost remaps back (device key -> unix seconds).
+    buttons_restored: HashMap<String, u64>,
     /// Event collections with a listener thread; a thread removes its path when the
     /// device goes away, so a later rescan starts a new one.
     listening: Arc<Mutex<HashSet<CString>>>,
@@ -114,6 +133,9 @@ struct App {
     updating: bool,
     installs_tx: Sender<Result<(), String>>,
     installs: Receiver<Result<(), String>>,
+    /// The session is locked, or the screen is off: the lights go down if set (#48).
+    locked: bool,
+    screen_off: bool,
 }
 
 /// What clicking a notification does.
@@ -174,6 +196,10 @@ thread_local! {
 /// happens if a message arrives re-entrantly.
 fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
     APP.with(|cell| cell.try_borrow_mut().ok().and_then(|mut a| a.as_mut().map(f)))
+}
+
+fn same_guid(a: &GUID, b: &GUID) -> bool {
+    (a.data1, a.data2, a.data3, a.data4) == (b.data1, b.data2, b.data3, b.data4)
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -242,6 +268,10 @@ pub fn run() {
         );
         TASKBAR_CREATED.store(RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()), Ordering::Relaxed);
         register_hid_notifications(hwnd);
+        // Locking and the screen turning off, for the lights while away (#48). Windows
+        // sends the display state once right away.
+        WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION);
+        RegisterPowerSettingNotification(hwnd, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
         // Event-driven, no polling: Windows calls back on this thread when the window
         // in front changes, and nothing runs in between.
         TRAY_HWND.store(hwnd, Ordering::Relaxed);
@@ -272,6 +302,7 @@ pub fn run() {
                 retry_step: 0,
                 synapse_warned: false,
                 low_battery: HashSet::new(),
+                buttons_restored: HashMap::new(),
                 batteries: Vec::new(),
                 listening: Arc::new(Mutex::new(HashSet::new())),
                 events_tx,
@@ -285,6 +316,8 @@ pub fn run() {
                 updating: false,
                 installs_tx,
                 installs,
+                locked: false,
+                screen_off: false,
             })
         });
         log::append("tray started");
@@ -292,6 +325,8 @@ pub fn run() {
         with_app(|app| app.rescan());
         start_retries(hwnd);
         SetTimer(hwnd, TIMER_BATTERY, BATTERY_MS, None);
+        SetTimer(hwnd, TIMER_BUTTONS, BUTTONS_MS, None);
+        SetTimer(hwnd, TIMER_LIGHTS, LIGHTS_MS, None);
         SetTimer(hwnd, TIMER_FIRMWARE, FIRMWARE_FIRST_MS, None);
         if std::env::args().any(|a| a == "--editor") {
             with_app(|app| app.open_editor());
@@ -373,8 +408,23 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 log::append("resumed from sleep");
                 schedule_rescan(hwnd, true);
                 start_retries(hwnd);
+            } else if wparam as u32 == PBT_POWERSETTINGCHANGE {
+                let setting = &*(lparam as *const POWERBROADCAST_SETTING);
+                if same_guid(&setting.PowerSetting, &GUID_CONSOLE_DISPLAY_STATE) {
+                    // 0 off, 1 on, 2 dimmed (still on).
+                    let off = setting.Data[0] == 0;
+                    with_app(|app| app.set_away(app.locked, off));
+                }
             }
             TRUE as LRESULT
+        }
+        WM_WTSSESSION_CHANGE => {
+            match wparam as u32 {
+                WTS_SESSION_LOCK => with_app(|app| app.set_away(true, app.screen_off)),
+                WTS_SESSION_UNLOCK => with_app(|app| app.set_away(false, app.screen_off)),
+                _ => None,
+            };
+            0
         }
         WM_TIMER if wparam == TIMER_RESCAN => {
             KillTimer(hwnd, TIMER_RESCAN);
@@ -388,7 +438,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let next = with_app(|app| {
                 app.rescan();
                 app.retry_step += 1;
-                RETRY_DELAYS_MS.get(app.retry_step).copied()
+                RETRY_DELAYS_MS.get(app.retry_step).copied().or_else(|| {
+                    let more = app.retry_step < RETRY_DELAYS_MS.len() + SLEEPER_RETRIES;
+                    (more && app.engine().has_sleeping()).then_some(SLEEPER_RETRY_MS)
+                })
             });
             if let Some(Some(ms)) = next {
                 SetTimer(hwnd, TIMER_RETRY, ms, None);
@@ -405,6 +458,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_TIMER if wparam == TIMER_BATTERY => {
             with_app(|app| app.check_battery());
+            0
+        }
+        WM_TIMER if wparam == TIMER_BUTTONS => {
+            with_app(|app| app.restore_lost_buttons());
+            0
+        }
+        WM_TIMER if wparam == TIMER_LIGHTS => {
+            with_app(|app| {
+                let mut engine = app.engine();
+                let relit = engine.retry_lights_back();
+                let dimmed = engine.retry_lights_away();
+                log_retry(&engine, "back", &relit);
+                log_retry(&engine, "away", &dimmed);
+                engine.refresh_frames();
+                engine.keep_laptops_lit();
+            });
             0
         }
         WM_TIMER if wparam == TIMER_FOREGROUND => {
@@ -428,6 +497,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+/// Log what a retry of the lights while away (or back) did, if anything.
+fn log_retry(engine: &Engine, what: &str, retry: &LightsRetry) {
+    if !retry.done.is_empty() {
+        log::append(&format!("lights {what}: {} answered on a retry", engine.names(&retry.done)));
+    }
+    if !retry.gave_up.is_empty() {
+        log::append(&format!("lights {what}: gave up on {} (not answering)", engine.names(&retry.gave_up)));
+    }
+}
+
+/// `; not answering: <names>, trying again for <n> s` for devices that missed a lights write.
+fn missed_note(engine: &Engine, missed: &[String], window: Duration) -> String {
+    if missed.is_empty() {
+        return String::new();
+    }
+    format!("; not answering: {}, trying again for {} s", engine.names(missed), window.as_secs())
 }
 
 /// A window came to the front: (re)start the settle timer.
@@ -472,6 +559,30 @@ impl App {
         self.warn_synapse(&synapse);
         self.check_battery();
         self.start_listeners();
+        // A device that arrives (or wakes) while the PC is locked comes up lit.
+        if let Some(percent) = TraySettings::load().away_percent().filter(|_| self.engine().is_away()) {
+            self.engine().lights_away(percent);
+        }
+    }
+
+    /// The lights go down while the PC is locked or its screen is off, if that's set (#48),
+    /// and come back after.
+    fn set_away(&mut self, locked: bool, screen_off: bool) {
+        (self.locked, self.screen_off) = (locked, screen_off);
+        let percent = TraySettings::load().away_percent().filter(|_| locked || screen_off);
+        let mut engine = self.engine();
+        match percent {
+            Some(percent) if !engine.is_away() => {
+                let missed = engine.lights_away(percent);
+                let why = if locked { "locked" } else { "screen off" };
+                log::append(&format!("{why}: lights to {percent}%{}", missed_note(&engine, &missed, DIM_FOR)));
+            }
+            None if engine.is_away() => {
+                let missed = engine.lights_back();
+                log::append(&format!("back: lights as saved{}", missed_note(&engine, &missed, RELIGHT_FOR)));
+            }
+            _ => {}
+        }
     }
 
     /// One thread per event collection, blocked in a read until the device reports
@@ -571,14 +682,30 @@ impl App {
         }
     }
 
+    fn restore_lost_buttons(&mut self) {
+        let now = now_secs();
+        self.buttons_restored.retain(|_, at| now.saturating_sub(*at) < BUTTONS_AGAIN_SECS);
+        let skip: HashSet<String> = self.buttons_restored.keys().cloned().collect();
+        let restored = self.engine().restore_lost_buttons(&skip);
+        for (key, report) in &restored {
+            self.buttons_restored.insert(key.clone(), now);
+            log::append(&format!("{}: button remaps were gone (asleep?), sent {} again", report.device, report.profile));
+        }
+        let reports: Vec<ApplyReport> = restored.into_iter().map(|(_, r)| r).collect();
+        self.notify_failures(&reports);
+    }
+
     fn check_battery(&mut self) {
+        self.engine().refresh_battery_lights();
         let batteries = self.engine().batteries();
+        let settings = TraySettings::load();
+        let low = settings.low_battery();
         for b in &batteries {
-            if b.charging || b.percent >= LOW_BATTERY + 10 {
+            if b.charging || b.percent >= low.saturating_add(10) {
                 self.low_battery.remove(&b.key);
-            } else if b.percent <= LOW_BATTERY && self.low_battery.insert(b.key.clone()) {
+            } else if b.percent <= low && self.low_battery.insert(b.key.clone()) {
                 log::append(&format!("low battery: {} {}%", b.name, b.percent));
-                if !TraySettings::load().battery_warning_off {
+                if !settings.battery_warning_off {
                     self.balloon("Battery low", &format!("{}: {}%", b.name, b.percent));
                 }
             }
