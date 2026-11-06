@@ -251,7 +251,7 @@ impl Engine {
     /// Failures are left out: a mouse off its dock or asleep doesn't answer, and the
     /// colour stays until the next check.
     pub fn refresh_battery_lights(&self) {
-        let Ok(mut store) = Self::store() else { return };
+        let Ok(mut store) = self.store() else { return };
         for dev in self.devices.iter().filter(|d| d.spec.as_ref().is_some_and(|s| s.wireless)) {
             let p = store.for_device(dev);
             let name = p.effective(self.foreground()).to_string();
@@ -268,7 +268,7 @@ impl Engine {
         if self.away.is_some() || self.frames_paused_until.is_some_and(|t| Instant::now() < t) {
             return;
         }
-        let Ok(mut store) = Self::store() else { return };
+        let Ok(mut store) = self.store() else { return };
         let wired_boards = self.devices.iter().filter(|d| {
             d.matrix().is_some()
                 && d.spec.as_ref().is_some_and(|s| {
@@ -288,7 +288,7 @@ impl Engine {
         if self.away.is_some() {
             return;
         }
-        let Ok(mut store) = Self::store() else { return };
+        let Ok(mut store) = self.store() else { return };
         let laptops = self.devices.iter().filter(|d| d.spec.as_ref().is_some_and(|s| s.kind == secbird_core::Kind::Laptop));
         for dev in laptops {
             let p = store.for_device(dev);
@@ -398,7 +398,7 @@ impl Engine {
     /// Run `f` on each lighting zone of each device whose lighting this app controls.
     /// Returns the keys of the devices where `f` failed: an asleep wireless device doesn't answer.
     fn each_zone(&self, f: impl Fn(&Device, u8) -> Result<()>) -> Vec<String> {
-        let Ok(mut store) = Self::store() else { return Vec::new() };
+        let Ok(mut store) = self.store() else { return Vec::new() };
         let mut failed = Vec::new();
         for dev in &self.devices {
             if store.for_device(dev).lighting_off {
@@ -652,9 +652,10 @@ mod tests {
         assert_eq!(switched.len(), 1);
         assert_eq!(switched[0].profile, "Streaming");
         assert_eq!(engine.set_foreground(None)[0].profile, "Default");
-    engine.rescan();
-    assert!(engine.camera_error().unwrap().contains("access denied"));
-    std::fs::remove_file(path).unwrap();
+        engine.rescan();
+        assert!(engine.camera_error().unwrap().contains("access denied"));
+        std::fs::remove_file(path).unwrap();
+    }
 
     use super::expire;
     use std::collections::HashMap;
