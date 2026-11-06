@@ -1,4 +1,5 @@
 [
+{"pid":"0E05","name":"Razer Kiyo Pro","kind":"webcam","source":"kiyoproctrls-protocol-facts"},
 {"pid":"0013","name":"Orochi 2011","kind":"mouse","txid":"FF","dpi":{"min":100,"max":4000,"step":50},"polling":"standard","source":"openrazer"},
 {"pid":"0015","name":"Naga","kind":"mouse","txid":"FF","dpi":{"min":100,"max":5600,"step":50},"polling":"standard","lighting":"standard","source":"openrazer"},
 {"pid":"0016","name":"DeathAdder 3.5G","kind":"mouse","dpi":{"min":100,"max":3500,"step":50},"polling":"standard","source":"openrazer"},

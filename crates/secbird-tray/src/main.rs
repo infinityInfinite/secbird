@@ -5,7 +5,10 @@
 
 #[cfg(windows)]
 mod apps;
-#[cfg(windows)]
+#[cfg(any(windows, test))]
+mod camera;
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
 mod engine;
 #[cfg(windows)]
 mod osd;

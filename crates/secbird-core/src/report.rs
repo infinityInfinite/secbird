@@ -65,6 +65,15 @@ pub struct Report {
     pub os: String,
     pub interfaces: Vec<Interface>,
     pub devices: Vec<DeviceReport>,
+    pub cameras: Vec<CameraReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CameraReport {
+    pub id: String,
+    pub name: String,
+    pub pid: String,
+    pub error: Option<String>,
 }
 
 /// Read-only GETs: (name, command, size, args).
@@ -157,6 +166,7 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
 
     for info in infos {
         let pid = info.product_id();
+        if db.get(pid).is_some_and(|spec| spec.kind == crate::Kind::Webcam) { continue; }
         let features = crate::transport::feature_reports(api, info.path());
         let dev = crate::device::open_interface(api, info.path(), pid, info.interface_number(), &TXID_CANDIDATES, db.spec(pid));
         interfaces.push(Interface {
@@ -182,6 +192,13 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
         os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         interfaces,
         devices,
+        cameras: match crate::camera::backend().and_then(|backend| backend.discover()) {
+            Ok(cameras) => cameras.into_iter().enumerate().map(|(index, camera)| CameraReport {
+                id: format!("camera-{}", index + 1), name: camera.name,
+                pid: format!("{:04X}", camera.pid), error: camera.control_error,
+            }).collect(),
+            Err(error) => vec![CameraReport { id: "camera-backend".into(), name: "Camera discovery".into(), pid: String::new(), error: Some(error.to_string()) }],
+        },
     }
 }
 
@@ -311,6 +328,10 @@ impl std::fmt::Display for Report {
         }
         if self.devices.is_empty() {
             writeln!(f, "\nNo interface answered Protocol 2.5.")?;
+        }
+        for camera in &self.cameras {
+            writeln!(f, "\nCamera {} {} ({})", camera.pid, camera.name, camera.id)?;
+            writeln!(f, "  {}", camera.error.as_deref().unwrap_or("UVC controls available; current settings not read back"))?;
         }
         Ok(())
     }

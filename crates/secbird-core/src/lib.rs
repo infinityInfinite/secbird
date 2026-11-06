@@ -11,6 +11,7 @@
 
 pub mod actions;
 pub mod buttons;
+pub mod camera;
 pub mod commands;
 #[cfg(windows)]
 pub mod debloat;

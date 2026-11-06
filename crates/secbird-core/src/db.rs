@@ -22,6 +22,7 @@ pub enum Kind {
     Keypad,
     Laptop,
     Accessory,
+    Webcam,
 }
 
 /// Which lighting command set a device speaks.
