@@ -2548,11 +2548,24 @@ function renderOverview() {
 // Follow DPI changes made with the mouse's own DPI button. The tray answers from memory
 // (no device access), and only reports newer than the last poll are applied, so a DPI
 // just set here is never undone. Paused while the page is hidden.
-let liveSeq = null;
+let liveSeq = null, listSeq = null, listLoading = false;
+// The tray found or lost a device by itself (one that was asleep answered): show it. Quiet
+// when the tray is busy, and an editor opened in the meantime is left alone; either way
+// `listSeq` stays behind, so the next tick that finds no editor open tries again. A first
+// load that failed is made up for the same way (`listSeq` is still null then).
+async function followList() {
+  listLoading = true;
+  try {
+    const s = await api('/api/state');
+    if (!sel) showState(s);
+  } catch { /* try again next tick */ }
+  listLoading = false;
+}
 async function pollLive() {
   if (document.hidden) return;
   try {
     const r = await api('/api/live');
+    if (r.list !== undefined && r.list !== listSeq && !sel && !listLoading) followList();
     if (liveSeq !== null && r.seq !== liveSeq) {
       for (const d of devices) {
         const v = r.dpi[d.id];
@@ -2568,19 +2581,23 @@ async function pollLive() {
 }
 setInterval(pollLive, 1000);
 
+// Show a device list the tray sent, and note which one it is (`list`, see followList).
+function showState(s) {
+  devices = s.devices; unsupported = s.unsupported || []; synapse = s.synapse || [];
+  if (s.list !== undefined) listSeq = s.list;
+  devices.forEach(d => { d.profile = d.profile || {}; d.profilesData = d.profilesData || {}; d.profilesData[d.active] = d.profile; });
+  if (s.version) $('home').title = 'Secretarybird ' + s.version + ': all devices';
+  const want = new URLSearchParams(location.search).get('d');
+  const wanted = d => d.pid === want || d.id === want;
+  dev = devices.find(d => dev && d.id === dev.id) || devices.find(wanted) || devices[0] || null;
+  if (showAll === null) showAll = !devices.some(wanted) && (devices.length > 1 || unsupported.length > 0);
+  if (!dev) sel = null;
+  render();
+}
 async function load(path = '/api/state', body) {
-  try {
-    const s = body ? await api(path, body) : await api(path);
-    devices = s.devices; unsupported = s.unsupported || []; synapse = s.synapse || [];
-    devices.forEach(d => { d.profile = d.profile || {}; d.profilesData = d.profilesData || {}; d.profilesData[d.active] = d.profile; });
-    if (s.version) $('home').title = 'Secretarybird ' + s.version + ': all devices';
-    const want = new URLSearchParams(location.search).get('d');
-    const wanted = d => d.pid === want || d.id === want;
-    dev = devices.find(d => dev && d.id === dev.id) || devices.find(wanted) || devices[0] || null;
-    if (showAll === null) showAll = !devices.some(wanted) && (devices.length > 1 || unsupported.length > 0);
-    if (!dev) sel = null;
-    render();
-  } catch (e) { toast(e.message, true); }
+  listLoading = true;
+  try { showState(body ? await api(path, body) : await api(path)); } catch (e) { toast(e.message, true); }
+  listLoading = false;
 }
 // Sync: one color (the top bar), or a zone's color or effect (its panel), on every zone of
 // every device; effects start together. Dragging the swatch syncs live.
@@ -2589,6 +2606,7 @@ const sendSync = live(async what => {
   syncing = what;
   const r = await api('/api/sync', { color: what.color || '', effect: what.effect || '' });
   devices = r.state.devices; unsupported = r.state.unsupported || []; synapse = r.state.synapse || [];
+  if (r.state.list !== undefined) listSeq = r.state.list;
   devices.forEach(d => { d.profile = d.profile || {}; d.profilesData = d.profilesData || {}; d.profilesData[d.active] = d.profile; });
   dev = devices.find(d => d.id === dev.id) || devices[0];
   render();
