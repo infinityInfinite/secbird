@@ -1,5 +1,6 @@
 use crate::engine::{ApplyReport, Battery, Engine, LightsRetry, DIM_FOR, RELIGHT_FOR};
-use secbird_core::log;
+use secbird_core::db::RAZER_VID;
+use secbird_core::{log, Kind};
 use std::collections::{HashMap, HashSet};
 use crate::settings::{autostart_enabled, open_config_folder, set_autostart, TraySettings};
 use crate::{apps, osd, server};
@@ -10,7 +11,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use windows_sys::core::GUID;
@@ -21,6 +22,10 @@ use windows_sys::Win32::System::RemoteDesktop::{WTSRegisterSessionNotification, 
 use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+use windows_sys::Win32::UI::Input::{
+    GetRawInputData, GetRawInputDeviceInfoW, RegisterRawInputDevices, HRAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER,
+    RIDEV_INPUTSINK, RIDEV_REMOVE, RIDI_DEVICENAME, RID_HEADER,
+};
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -40,6 +45,8 @@ const WM_UPDATE: u32 = WM_APP + 6;
 const WM_UPDATE_INSTALL: u32 = WM_APP + 7;
 /// Sent by the editor's "Update now": the release is waiting in `REQUESTED_UPDATE`.
 const WM_START_UPDATE: u32 = WM_APP + 8;
+/// Sent by the editor's server after it rescanned by itself: who is asleep may have changed.
+const WM_RESCANNED: u32 = WM_APP + 9;
 const CLASS_NAME: &str = "SecretarybirdTray";
 const TIMER_RESCAN: usize = 1;
 /// Extra rescans after start and wake: devices often answer late at boot.
@@ -49,6 +56,16 @@ const RETRY_DELAYS_MS: [u32; 3] = [4_000, 15_000, 45_000];
 /// once a minute for half an hour, so it still gets its profile (#37).
 const SLEEPER_RETRY_MS: u32 = 60_000;
 const SLEEPER_RETRIES: usize = 30;
+/// A device that is asleep says it woke by sending input: a key press, a movement. Windows
+/// tells us who sent it (raw input), and that starts the retries again, however long it
+/// slept. Registered only while a device is asleep, and only for its kind of input.
+const USAGE_PAGE_DESKTOP: u16 = 0x01;
+const USAGE_MOUSE: u16 = 0x02;
+const USAGE_KEYBOARD: u16 = 0x06;
+/// How many times input may start the retries for a device that still doesn't answer, so
+/// one that types but never answers isn't looked for on every key. Starts over once
+/// nothing is asleep, and after a wake.
+const INPUT_WAKES: u8 = 5;
 /// Battery check for wireless devices (cheap: two short USB requests per device).
 const TIMER_BATTERY: usize = 3;
 const BATTERY_MS: u32 = 5 * 60 * 1000;
@@ -75,6 +92,8 @@ const BUTTONS_AGAIN_SECS: u64 = 60;
 /// set to stay lit get a read on the same beat (#34).
 const TIMER_LIGHTS: usize = 7;
 const LIGHTS_MS: u32 = 3_000;
+/// [`App::follow_sleepers`] again, when the editor's server asked for it at a busy moment.
+const TIMER_SLEEPERS: usize = 8;
 
 const ID_REAPPLY: u32 = 1;
 const ID_FOLDER: u32 = 2;
@@ -95,6 +114,11 @@ const GUID_DEVINTERFACE_HID: GUID = GUID::from_u128(0x4d1e55b2_f16f_11cf_88cb_00
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// The tray window, for the foreground hook (which gets no user data).
 static TRAY_HWND: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+/// Index into RETRY_DELAYS_MS of the next retry, and how many times the retries were started
+/// over. Not in `App`: a device arrival is a sent message, which can come in while `App` is
+/// borrowed (inside a shell call), and it must still start them over.
+static RETRY_STEP: AtomicUsize = AtomicUsize::new(0);
+static RETRY_CHAIN: AtomicU32 = AtomicU32::new(0);
 
 struct App {
     hwnd: HWND,
@@ -107,8 +131,6 @@ struct App {
     profile_items: Vec<(String, String)>,
     /// Apply to every device on the next rescan, not just newly arrived ones.
     apply_all_pending: bool,
-    /// Index into RETRY_DELAYS_MS of the next retry.
-    retry_step: usize,
     /// Warned about Synapse since it last started.
     synapse_warned: bool,
     /// Devices already warned about low battery (cleared once charging or recovered).
@@ -136,6 +158,24 @@ struct App {
     /// The session is locked, or the screen is off: the lights go down if set (#48).
     locked: bool,
     screen_off: bool,
+    /// Known wireless devices that are plugged in but not answering.
+    asleep: Vec<Sleeper>,
+    /// Raw input registered right now: from keyboards, from mice.
+    input_watch: (bool, bool),
+    /// Input from a device that is asleep started the retries; no watching until the quick
+    /// ones are over, or every key typed meanwhile would start them again.
+    input_woke: bool,
+    /// How many more times input may start them (see [`INPUT_WAKES`]).
+    input_wakes_left: u8,
+    /// The last raw input device that wasn't one of them, to pass over its next reports.
+    input_other: HANDLE,
+}
+
+/// A device in [`App::asleep`].
+struct Sleeper {
+    pid: u16,
+    name: String,
+    kind: Option<Kind>,
 }
 
 /// What clicking a notification does.
@@ -157,6 +197,17 @@ pub fn request_update(r: Release) -> bool {
         }
         *REQUESTED_UPDATE.lock().unwrap_or_else(|p| p.into_inner()) = Some(r);
         PostMessageW(tray, WM_START_UPDATE, 0, 0) != 0
+    }
+}
+
+/// The editor's server rescanned by itself (its Rescan button, a request that failed): let
+/// the tray follow who is asleep now. Nothing to do when no tray is running (`--serve`).
+pub fn rescanned() {
+    unsafe {
+        let tray = FindWindowW(wide(CLASS_NAME).as_ptr(), null());
+        if !tray.is_null() {
+            PostMessageW(tray, WM_RESCANNED, 0, 0);
+        }
     }
 }
 
@@ -299,7 +350,6 @@ pub fn run() {
                 editor_url: None,
                 profile_items: Vec::new(),
                 apply_all_pending: true,
-                retry_step: 0,
                 synapse_warned: false,
                 low_battery: HashSet::new(),
                 buttons_restored: HashMap::new(),
@@ -318,6 +368,11 @@ pub fn run() {
                 installs,
                 locked: false,
                 screen_off: false,
+                asleep: Vec::new(),
+                input_watch: (false, false),
+                input_woke: false,
+                input_wakes_left: INPUT_WAKES,
+                input_other: null_mut(),
             })
         });
         log::append("tray started");
@@ -383,6 +438,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             }
             0
         }
+        WM_RESCANNED => {
+            if with_app(|app| app.follow_sleepers()).is_none() {
+                SetTimer(hwnd, TIMER_SLEEPERS, SETTLE_MS, None);
+            }
+            0
+        }
+        WM_INPUT => {
+            if with_app(|app| app.woken_by(lparam as HRAWINPUT)) == Some(true) {
+                schedule_rescan(hwnd, false);
+                start_retries(hwnd);
+            }
+            // Windows releases the input's buffer here.
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_REPORT_READY => {
             with_app(|app| {
                 if wparam == 1 {
@@ -400,12 +469,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let event = wparam as u32;
             if (event == DBT_DEVICEARRIVAL || event == DBT_DEVICEREMOVECOMPLETE) && is_razer(lparam) {
                 schedule_rescan(hwnd, false);
+                // A receiver answers before the keyboard or mouse behind it does: after its
+                // dock is plugged back in the device stays quiet until its next key press.
+                // One look isn't enough, so keep looking, as after start and wake.
+                if event == DBT_DEVICEARRIVAL {
+                    start_retries(hwnd);
+                }
             }
             TRUE as LRESULT
         }
         WM_POWERBROADCAST => {
             if wparam as u32 == PBT_APMRESUMEAUTOMATIC {
                 log::append("resumed from sleep");
+                with_app(|app| app.input_wakes_left = INPUT_WAKES);
                 schedule_rescan(hwnd, true);
                 start_retries(hwnd);
             } else if wparam as u32 == PBT_POWERSETTINGCHANGE {
@@ -435,16 +511,42 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_TIMER if wparam == TIMER_RETRY => {
             KillTimer(hwnd, TIMER_RETRY);
+            let chain = RETRY_CHAIN.load(Ordering::Relaxed);
             let next = with_app(|app| {
                 app.rescan();
-                app.retry_step += 1;
-                RETRY_DELAYS_MS.get(app.retry_step).copied().or_else(|| {
-                    let more = app.retry_step < RETRY_DELAYS_MS.len() + SLEEPER_RETRIES;
+                // A device arrived during that rescan and started the retries over: its
+                // timer stands, and this retry was the old chain's last.
+                if RETRY_CHAIN.load(Ordering::Relaxed) != chain {
+                    return None;
+                }
+                let step = RETRY_STEP.fetch_add(1, Ordering::Relaxed) + 1;
+                let next = RETRY_DELAYS_MS.get(step).copied().or_else(|| {
+                    let more = step < RETRY_DELAYS_MS.len() + SLEEPER_RETRIES;
                     (more && app.engine().has_sleeping()).then_some(SLEEPER_RETRY_MS)
-                })
+                });
+                // The quick retries that input started are over: watch for input again.
+                if app.input_woke && step >= RETRY_DELAYS_MS.len() {
+                    app.input_woke = false;
+                    app.follow_sleepers();
+                }
+                next
             });
-            if let Some(Some(ms)) = next {
-                SetTimer(hwnd, TIMER_RETRY, ms, None);
+            match next {
+                Some(Some(ms)) => {
+                    SetTimer(hwnd, TIMER_RETRY, ms, None);
+                }
+                Some(None) => {}
+                // Busy: this retry came in during another message. Try it again shortly.
+                None => {
+                    SetTimer(hwnd, TIMER_RETRY, SETTLE_MS, None);
+                }
+            }
+            0
+        }
+        WM_TIMER if wparam == TIMER_SLEEPERS => {
+            KillTimer(hwnd, TIMER_SLEEPERS);
+            if with_app(|app| app.follow_sleepers()).is_none() {
+                SetTimer(hwnd, TIMER_SLEEPERS, SETTLE_MS, None);
             }
             0
         }
@@ -527,7 +629,8 @@ unsafe extern "system" fn on_foreground(_: HWINEVENTHOOK, _: u32, _: HWND, _: i3
 
 /// Rescan a few more times over the next minute (new devices get their profile).
 fn start_retries(hwnd: HWND) {
-    with_app(|app| app.retry_step = 0);
+    RETRY_STEP.store(0, Ordering::Relaxed);
+    RETRY_CHAIN.fetch_add(1, Ordering::Relaxed);
     unsafe { SetTimer(hwnd, TIMER_RETRY, RETRY_DELAYS_MS[0], None) };
 }
 
@@ -544,17 +647,24 @@ impl App {
 
     fn rescan(&mut self) {
         let apply_all = std::mem::take(&mut self.apply_all_pending);
-        let (reports, new_names, synapse) = {
+        let (reports, new_names, gone, synapse) = {
             let mut engine = self.engine();
+            let before: Vec<(String, String)> = engine.devices().iter().map(|d| (d.key(), engine.label(d))).collect();
             let new = engine.rescan();
             let names: Vec<String> =
                 engine.devices().iter().filter(|d| new.contains(&d.key())).map(|d| engine.label(d)).collect();
-            let targets = if apply_all { engine.all_keys() } else { new };
-            (engine.apply(&targets), names, engine.synapse().to_vec())
+            let now = engine.all_keys();
+            let gone: Vec<String> = before.into_iter().filter(|(key, _)| !now.contains(key)).map(|(_, name)| name).collect();
+            let targets = if apply_all { now } else { new };
+            (engine.apply(&targets), names, gone, engine.synapse().to_vec())
         };
+        if !gone.is_empty() {
+            log::append(&format!("gone: {}", gone.join(", ")));
+        }
         if !new_names.is_empty() {
             log::append(&format!("found: {}", new_names.join(", ")));
         }
+        self.follow_sleepers();
         self.notify_failures(&reports);
         self.warn_synapse(&synapse);
         self.check_battery();
@@ -563,6 +673,82 @@ impl App {
         if let Some(percent) = TraySettings::load().away_percent().filter(|_| self.engine().is_away()) {
             self.engine().lights_away(percent);
         }
+    }
+
+    /// Note which known wireless devices are plugged in but not answering, and watch for
+    /// input from them: the first key press or movement means the device is awake, and
+    /// starts the retries. Called after everything that may change who is asleep.
+    fn follow_sleepers(&mut self) {
+        let asleep: Vec<Sleeper> =
+            self.engine().sleeping().map(|u| Sleeper { pid: u.pid, name: u.name.clone(), kind: u.kind }).collect();
+        let fresh: Vec<&str> =
+            asleep.iter().filter(|s| !self.asleep.iter().any(|old| old.pid == s.pid)).map(|s| s.name.as_str()).collect();
+        if asleep.is_empty() {
+            (self.input_woke, self.input_wakes_left) = (false, INPUT_WAKES);
+        }
+        let watch = !self.input_woke && self.input_wakes_left > 0;
+        let keys = watch && asleep.iter().any(|s| matches!(s.kind, Some(Kind::Keyboard | Kind::Keypad)));
+        let mice = watch && asleep.iter().any(|s| s.kind == Some(Kind::Mouse));
+        self.watch_input(keys, mice);
+        if !fresh.is_empty() {
+            let how = if self.input_watch == (false, false) { "" } else { ", looking again at its next key press or movement" };
+            log::append(&format!("not answering: {} (asleep?){how}", fresh.join(", ")));
+        }
+        self.asleep = asleep;
+    }
+
+    /// Register or drop raw input from keyboards and from mice, whichever changed.
+    fn watch_input(&mut self, keys: bool, mice: bool) {
+        self.input_other = null_mut();
+        let (had_keys, had_mice) = self.input_watch;
+        for (usage, had, want) in [(USAGE_KEYBOARD, had_keys, keys), (USAGE_MOUSE, had_mice, mice)] {
+            if had == want {
+                continue;
+            }
+            let device = RAWINPUTDEVICE {
+                usUsagePage: USAGE_PAGE_DESKTOP,
+                usUsage: usage,
+                // INPUTSINK: also while another window has the focus (this one never does).
+                dwFlags: if want { RIDEV_INPUTSINK } else { RIDEV_REMOVE },
+                hwndTarget: if want { self.hwnd } else { null_mut() },
+            };
+            let done = unsafe { RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) } != 0;
+            // A watch that couldn't start isn't one; one that couldn't stop only costs
+            // a look at each input, and is asked to stop again next time.
+            let now = if done { want } else { had && !want };
+            if usage == USAGE_KEYBOARD {
+                self.input_watch.0 = now;
+            } else {
+                self.input_watch.1 = now;
+            }
+        }
+    }
+
+    /// Raw input arrived. True when a device that is asleep sent it: it is awake, so look
+    /// for it. Only who sent the input is read, never the input itself.
+    fn woken_by(&mut self, input: HRAWINPUT) -> bool {
+        if self.input_woke || self.input_wakes_left == 0 || self.asleep.is_empty() {
+            return false;
+        }
+        // Input made by a program (remote desktop, a macro tool) comes from no device.
+        let Some(source) = (unsafe { raw_input_source(input) }) else { return false };
+        if source == self.input_other {
+            return false;
+        }
+        let path = unsafe { raw_device_path(source) };
+        let Some(sleeper) = self.asleep.iter().find(|s| path.contains(&hardware_id(s.pid))) else {
+            // A device Windows couldn't name is asked about again at its next report.
+            if !path.is_empty() {
+                self.input_other = source;
+            }
+            return false;
+        };
+        log::append(&format!("input from {}: looking for it again", sleeper.name));
+        self.input_woke = true;
+        self.input_wakes_left = self.input_wakes_left.saturating_sub(1);
+        // A mouse reports a thousand times a second: no more input until this search is over.
+        self.watch_input(false, false);
+        true
     }
 
     /// The lights go down while the PC is locked or its screen is off, if that's set (#48),
@@ -1185,6 +1371,32 @@ unsafe fn is_razer(lparam: LPARAM) -> bool {
 }
 
 
+/// How a Razer product shows in a device path: `VID_1532&PID_0290`.
+fn hardware_id(pid: u16) -> String {
+    format!("VID_{RAZER_VID:04X}&PID_{pid:04X}")
+}
+
+/// The device a raw input came from; `None` for input no device sent.
+unsafe fn raw_input_source(input: HRAWINPUT) -> Option<HANDLE> {
+    let mut header: RAWINPUTHEADER = zeroed();
+    let mut size = size_of::<RAWINPUTHEADER>() as u32;
+    let read = GetRawInputData(input, RID_HEADER, &mut header as *mut _ as *mut c_void, &mut size, size_of::<RAWINPUTHEADER>() as u32);
+    (read != u32::MAX && !header.hDevice.is_null()).then_some(header.hDevice)
+}
+
+/// A raw input device's path in upper case, like `\\?\HID#VID_1532&PID_0290&MI_00#...`;
+/// empty when Windows doesn't give one.
+unsafe fn raw_device_path(device: HANDLE) -> String {
+    let mut len = 0u32;
+    GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, null_mut(), &mut len);
+    let mut buf = vec![0u16; len as usize];
+    if buf.is_empty() || GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, buf.as_mut_ptr() as *mut c_void, &mut len) == u32::MAX {
+        return String::new();
+    }
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..end]).to_ascii_uppercase()
+}
+
 /// Put text on the clipboard. False if another program holds it.
 fn set_clipboard(text: &str) -> bool {
     use windows_sys::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
@@ -1237,5 +1449,23 @@ unsafe fn load_icon() -> HICON {
         LoadIconW(null_mut(), IDI_APPLICATION)
     } else {
         icon as HICON
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hardware_id;
+
+    /// The keyboard collection of a DeathStalker V2 Pro receiver, as raw input names it
+    /// (upper-cased, as [`super::raw_device_path`] returns it).
+    const RECEIVER_KEYS: &str = r"\\?\HID#VID_1532&PID_0290&MI_00#A&1463A5&0&0000#{884B96C3-56EF-11D1-BC8C-00A0C91405DD}";
+
+    #[test]
+    fn input_is_matched_to_the_device_that_is_asleep() {
+        assert_eq!(hardware_id(0x0290), "VID_1532&PID_0290");
+        assert!(RECEIVER_KEYS.contains(&hardware_id(0x0290)));
+        // The same keyboard on its cable is another product, and so is another vendor's.
+        assert!(!RECEIVER_KEYS.contains(&hardware_id(0x0292)));
+        assert!(!r"\\?\HID#VID_046D&PID_0290&MI_00#7&0&0000#{884B96C3-56EF-11D1-BC8C-00A0C91405DD}".contains(&hardware_id(0x0290)));
     }
 }

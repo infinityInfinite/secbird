@@ -219,10 +219,12 @@ impl Server {
             ("GET", "/api/apps") => Ok(json!({ "apps": crate::apps::running() })),
             ("GET", "/api/live") => {
                 let (seq, dpi) = engine.live_dpi();
-                Ok(json!({ "seq": seq, "dpi": dpi.iter().map(|(k, (x, y))| (k.clone(), json!([x, y]))).collect::<serde_json::Map<_, _>>() }))
+                let dpi = dpi.iter().map(|(k, (x, y))| (k.clone(), json!([x, y]))).collect::<serde_json::Map<_, _>>();
+                Ok(json!({ "seq": seq, "dpi": dpi, "list": engine.list_seq() }))
             }
             ("POST", "/api/rescan") => {
                 engine.rescan();
+                crate::win::rescanned();
                 Ok(state(&engine))
             }
             ("GET", "/api/settings") => Ok(settings_json(&engine)),
@@ -534,6 +536,7 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
     match attempt(engine) {
         Err(Error::Hid(_)) | Err(Error::NotFound(_)) | Err(Error::NoReply(_)) => {
             engine.rescan();
+            crate::win::rescanned();
             attempt(engine)
         }
         other => other,
@@ -669,6 +672,7 @@ fn state(engine: &Engine) -> Value {
             "pid": format!("{:04X}", u.pid), "name": u.name, "reason": u.reason,
         })).collect::<Vec<_>>(),
         "synapse": engine.synapse(),
+        "list": engine.list_seq(),
     })
 }
 

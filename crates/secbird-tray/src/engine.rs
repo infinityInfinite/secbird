@@ -26,6 +26,8 @@ pub struct Engine {
     relight: HashMap<String, Instant>,
     /// Devices that didn't answer [`Engine::lights_away`], and until when to keep trying.
     dim: HashMap<String, Instant>,
+    /// Grows each time a rescan finds other devices than the one before it.
+    list_seq: u64,
 }
 
 const FINDER_PAUSE: Duration = Duration::from_secs(10 * 60);
@@ -52,6 +54,8 @@ pub struct Unsupported {
     pub pid: u16,
     pub name: String,
     pub reason: &'static str,
+    /// What the database says it is: the kind of input that shows it woke up.
+    pub kind: Option<secbird_core::Kind>,
 }
 
 /// What a retry of [`Engine::lights_away`] or [`Engine::lights_back`] did, by device key.
@@ -92,6 +96,7 @@ impl Engine {
             away: None,
             relight: HashMap::new(),
             dim: HashMap::new(),
+            list_seq: 0,
         })
     }
 
@@ -376,6 +381,7 @@ impl Engine {
     /// Re-enumerate devices. Returns the keys of devices that were not present before.
     pub fn rescan(&mut self) -> Vec<String> {
         let before: HashSet<String> = self.devices.iter().map(|d| d.key()).collect();
+        let listed_before = self.listed();
         self.devices.clear(); // close stale handles before reopening
         let _ = self.api.refresh_devices();
         let db = Db::load(Some(&config_dir().join("devices.json")))
@@ -384,25 +390,48 @@ impl Engine {
         self.devices = discover(&self.api, &db);
         self.unsupported = secbird_core::device::unanswered(&self.api, &self.devices)
             .into_iter()
-            .map(|pid| match db.get(pid) {
-                Some(spec) if spec.lighting == secbird_core::Lighting::Kraken => {
-                    Unsupported { pid, name: spec.name.clone(), reason: "Headset protocol not supported yet" }
-                }
-                Some(spec) if spec.wireless => Unsupported { pid, name: spec.name.clone(), reason: ASLEEP },
-                Some(spec) => Unsupported { pid, name: spec.name.clone(), reason: "Not answering. Is Synapse running?" },
-                None => match db.bluetooth_name(pid) {
-                    Some(name) => Unsupported { pid, name, reason: BLUETOOTH },
-                    None => Unsupported { pid, name: format!("Razer device {pid:04X}"), reason: "Unknown model. Run secbird report" },
-                },
+            .map(|pid| {
+                let spec = db.get(pid);
+                let (name, reason) = match spec {
+                    Some(spec) if spec.lighting == secbird_core::Lighting::Kraken => (spec.name.clone(), "Headset protocol not supported yet"),
+                    Some(spec) if spec.wireless => (spec.name.clone(), ASLEEP),
+                    Some(spec) => (spec.name.clone(), "Not answering. Is Synapse running?"),
+                    None => match db.bluetooth_name(pid) {
+                        Some(name) => (name, BLUETOOTH),
+                        None => (format!("Razer device {pid:04X}"), "Unknown model. Run secbird report"),
+                    },
+                };
+                Unsupported { pid, name, reason, kind: spec.map(|s| s.kind) }
             })
             .collect();
         self.synapse = secbird_core::debloat::synapse_running();
+        if self.listed() != listed_before {
+            self.list_seq += 1;
+        }
         self.devices.iter().map(|d| d.key()).filter(|k| !before.contains(k)).collect()
     }
 
-    /// A known wireless device is plugged in (its receiver is) but not answering yet.
+    /// Everything the editor lists, by name: the devices that answer, then the ones that
+    /// don't. A receiver keeps its key when it learns which mouse it carries, but not its name.
+    fn listed(&self) -> Vec<String> {
+        let answering = self.devices.iter().map(|d| format!("+{} {}", d.key(), d.name()));
+        let silent = self.unsupported.iter().map(|u| format!("-{:04X} {} {}", u.pid, u.name, u.reason));
+        answering.chain(silent).collect()
+    }
+
+    /// A counter that grows when a rescan changes that list, so an open editor shows a
+    /// device the tray found by itself (one that was asleep) without a click on Rescan.
+    pub fn list_seq(&self) -> u64 {
+        self.list_seq
+    }
+
+    /// Known wireless devices that are plugged in (their receiver is) but not answering yet.
+    pub fn sleeping(&self) -> impl Iterator<Item = &Unsupported> {
+        self.unsupported.iter().filter(|u| u.reason == ASLEEP)
+    }
+
     pub fn has_sleeping(&self) -> bool {
-        self.unsupported.iter().any(|u| u.reason == ASLEEP)
+        self.sleeping().next().is_some()
     }
 
     /// Read profiles fresh from disk, so changes made with the CLI are picked up.
