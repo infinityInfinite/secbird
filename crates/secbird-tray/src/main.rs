@@ -8,11 +8,17 @@ mod apps;
 #[cfg(windows)]
 mod engine;
 #[cfg(windows)]
+mod input;
+#[cfg(windows)]
 mod osd;
 #[cfg(windows)]
 mod server;
 #[cfg(windows)]
+mod sensors;
+#[cfg(windows)]
 mod settings;
+#[cfg(windows)]
+mod studio;
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
@@ -36,11 +42,14 @@ fn serve() {
         Err(e) => return eprintln!("could not start HID access: {e}"),
     };
     engine.rescan();
-    match server::start(std::sync::Arc::new(std::sync::Mutex::new(engine))) {
+    let engine = std::sync::Arc::new(std::sync::Mutex::new(engine));
+    match server::start(engine.clone()) {
         Ok(editor) => {
             println!("{}", editor.url);
+            // Layered lighting runs here too, so Studio can be tried on SECBIRD_SIM devices.
             loop {
-                std::thread::park();
+                std::thread::sleep(std::time::Duration::from_millis(1000 / secbird_core::studio::FPS as u64));
+                engine.lock().unwrap_or_else(|p| p.into_inner()).studio_tick();
             }
         }
         Err(e) => eprintln!("could not start the editor: {e}"),

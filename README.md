@@ -19,14 +19,15 @@ A small, lightweight replacement for Razer Synapse on Windows. Set your Razer mo
 keyboard and other peripherals: lighting, DPI, polling rate, button remapping and profiles, without
 Synapse's background services, account, ads, pop-ups or restart prompts.
 
-- **Light:** a 1 MB tray app using about 12 MB of RAM, next to the hundreds of MB Synapse keeps running.
+- **Light:** a 1.5 MB tray app using about 13 MB of RAM, next to the hundreds of MB Synapse keeps running.
 - **Quiet:** no services, no account, no telemetry. It sits in the tray and
   applies your settings when you sign in, plug a device in or wake the PC. The only time it goes
   online is a daily check for a new Secretarybird version, which you can turn off.
 - **Built for many devices:** one screen for all of them, and one click to put a color or effect on every device, in step.
 
-> **Beta.** We test on a Basilisk V3, and users have confirmed nine more devices, from Naga and
-> Viper mice to BlackWidow keyboards and a Tartarus keypad (see below). Other devices are
+> **Beta.** We test on a Basilisk V3, and users have confirmed over fifteen more devices, from
+> Naga, Viper and DeathAdder mice to BlackWidow and Huntsman keyboards, a Tartarus keypad and a
+> BlackShark headset (see below). Other devices are
 > supported from public protocol facts and may not work yet. [Tell us how yours does](#help-us-support-your-device).
 
 ### [⬇ Download for Windows](https://github.com/infinityInfinite/secbird/releases/latest) · [⬇ Download for Linux](#linux-command-line-beta)
@@ -34,7 +35,7 @@ Synapse's background services, account, ads, pop-ups or restart prompts.
 Free · Windows 10 and 11 · on the page that opens, click `Secretarybird-Setup-<version>.exe`.
 On Linux it's the command line, in beta: see [Linux](#linux-command-line-beta).
 
-![All devices](docs/overview.png)
+![RGB Studio: fire, ripples and an audio meter in layers on a keyboard](docs/studio.png)
 
 ## Beyond Synapse
 
@@ -42,6 +43,12 @@ Things Secretarybird does that Synapse won't:
 
 - **Run on Linux.** The command line works on any x86_64 distribution.
 - **Compare profiles.** Every profile of a device side by side on one screen.
+- **Every effect on every device.** RGB Studio draws the lighting itself, so a mouse whose
+  firmware only knows spectrum and wave still gets breathing, starlight, fire, ripple, an audio
+  meter or the screen's colors, in layers.
+- **Undo what Synapse left behind.** A scroll wheel whose mode button skips a mode, a light
+  stuck at 0 % brightness: settings Synapse saved on the device and never showed you are
+  visible here and can be changed back.
 - **Script it.** The [`secbird` command line](#command-line) does what the editor does: DPI,
   lighting, remaps, macros, profiles.
 - **Plain files.** Your settings are one `profiles.json`; back it up or copy it to another PC.
@@ -96,25 +103,37 @@ one at a time. Bug reports from Linux are very welcome, with `secbird report` ou
 
 ## Using it
 
-![A Naga with six profiles side by side in Compare](docs/mouse.png)
+![All devices on one screen](docs/overview.png)
 
-| Naga side grid, a button playing a macro | Keyboard, per-key |
+| Naga side grid and HyperShift | Scroll wheel: mode and skipped modes |
 |---|---|
-| ![Button editor](docs/buttons.png) | ![Keyboard page](docs/keyboard.png) |
+| ![Buttons of a Naga V2 Pro](docs/buttons.png) | ![Scroll wheel settings](docs/scroll.png) |
 
-<sub>Screenshots: the simulated devices built into the app, next to a real Basilisk V3.</sub>
+![BlackShark V3 Pro: the speaker EQ](docs/headset.png)
+
+<sub>Screenshots: the simulated devices built into the app (`SECBIRD_SIM=all`).</sub>
 
 - **Tray icon:** switch profiles per device, re-apply settings, Start with Windows. Hover it to see
   each device's profile and battery.
 - **Editor:** opens in your browser but runs only on your PC (`127.0.0.1`), protected by a
   one-time key. Made to be quick mid-game: it opens on the live profile, with your profiles in a
-  switcher on top; pick a section (Lighting, Sensitivity, Buttons, Macros, Power, Profile,
-  Device), click a tile, change it in the side panel. Nothing scrolls on a desktop window, even
+  switcher on top; pick a section (Lighting, Sensitivity, Buttons, Scroll wheel, Macros, Power,
+  Audio, Profile, Device; each device shows the ones it has), click a tile, change it in the side
+  panel. Nothing scrolls on a desktop window, even
   a Naga with all its side buttons. Compare shows every profile side by side. Seven themes
   (Bridge, Roast, Classic, Light, Workshop, Neon, Acid), or Auto to follow Windows.
 - **Lighting:** colors and brightness per zone, per-key painting on per-key keyboards, and the
   effects the device runs itself (spectrum, wave, breathing, reactive, starlight; each device
   only has some of them). Verified on the Basilisk V3 (spectrum, wave).
+- **RGB Studio:** the **RGB Studio** tab (or **Lighting → RGB Studio** on a device) stacks
+  effects in layers, each on all lights, some zones or the keys you pick: static, gradient,
+  breathing, spectrum, wave, wheel, blink, reactive, ripple, starlight, fire, rain, audio meter,
+  screen color and battery, with your colors, speed, direction, blend and opacity. Start from a
+  scene (Fire on WASD, Night sky, Music…), and put it on every device in step with one click.
+  The drawing shows the device live. Secretarybird draws the frames (30 a second, 10 for
+  wireless devices to save battery), so it runs while the tray runs; closed, the device shows
+  its zone colors. The tab says what it costs: about 0 % CPU, under 1 % with the audio meter or
+  screen color.
 - **Leave RGB to another app:** open a device's **Lighting → Control lighting** tile and
   turn off **Secretarybird controls lighting** (CLI: `secbird -d SERIAL lighting off`).
   It leaves the lights as they are, not off: no colors, effects, brightness or per-key writes,
@@ -131,6 +150,12 @@ one at a time. Bug reports from Linux are very welcome, with `secbird report` ou
   button back (also in the tray menu, which works from the keyboard), and the app won't let you
   remap away your last left click. Verified on the Basilisk V3, and by users on the Naga V2
   HyperSpeed's 12-button side grid and HyperShift. The Naga's 6-button plate is included too.
+- **Scroll wheel** (mice with a HyperScroll wheel, like the Naga V3 Pro and Basilisk V3 Pro):
+  tactile, free-spin or precision tactile; which modes the wheel-mode button skips; scroll
+  acceleration and Smart-Reel. Saved per profile. Checked by a user on a Naga V3 Pro.
+- **Headset** (BlackShark V3 Pro): battery, noise cancelling and ambient sound, six speaker EQ
+  slots you drag band by band, microphone EQ and presets, sidetone and auto power-off, saved in
+  profiles like everything else.
 - **Macros** stored on the device: keys, shortcuts, mouse buttons, wheel and delays, typed as steps
   or recorded in the editor. Play one from any button once, several times, while held, or as a
   toggle; it runs without Secretarybird open. Macros made in Synapse show up too. Verified on
@@ -181,6 +206,11 @@ secbird button side-back macro:1
 secbird color logo FF8800       static color for a zone
 secbird effect logo spectrum    built-in effect: spectrum, wave, breathing, reactive, starlight
 secbird keys 00FFAA             every key one color (per-key keyboards)
+secbird studio add wave         Studio layer: any effect, e.g. `studio add ripple:FFFFFF blend=lit`
+secbird studio play 15          show the Studio layers for 15 s without the tray
+secbird scroll mode free-spin   HyperScroll wheel: tactile, free-spin, precision-tactile
+secbird scroll disable tactile  the wheel-mode button skips tactile (`none` to skip nothing)
+secbird audio                   headset: list every setting (`audio anc 1 3` sets one)
 secbird firmware                is newer firmware out? (links to Razer's updater)
 secbird update                  is a newer Secretarybird out?
 secbird sync 00FFAA             same color on every device
@@ -224,13 +254,21 @@ value the device answers with, so each entry can be checked against it before it
 - Naga V2 Pro ([#4](https://github.com/infinityInfinite/secbird/issues/4), [#13](https://github.com/infinityInfinite/secbird/issues/13))
 - Naga V2 HyperSpeed, with side grid, battery and HyperShift ([#8](https://github.com/infinityInfinite/secbird/issues/8), [#11](https://github.com/infinityInfinite/secbird/issues/11))
 - Viper Ultimate, wired and wireless ([#14](https://github.com/infinityInfinite/secbird/issues/14))
-- DeathAdder V3 Pro, through a HyperPolling dongle ([#17](https://github.com/infinityInfinite/secbird/pull/17))
+- DeathAdder V3 Pro, through a HyperPolling dongle ([#17](https://github.com/infinityInfinite/secbird/pull/17)) and on its own receiver ([#87](https://github.com/infinityInfinite/secbird/issues/87))
+- DeathAdder V3 HyperSpeed ([#85](https://github.com/infinityInfinite/secbird/issues/85))
+- Basilisk V3 Pro 35K on the Mouse Dock Pro, with 8000 Hz polling ([#65](https://github.com/infinityInfinite/secbird/issues/65))
+- Naga V3 Pro on the Mouse Dock Pro, with the scroll wheel settings ([#62](https://github.com/infinityInfinite/secbird/pull/62))
 
 **Keyboards and keypads**
 - BlackWidow 2019 ([#12](https://github.com/infinityInfinite/secbird/issues/12))
 - BlackWidow V4 Low-Profile HyperSpeed, wireless and wired ([#28](https://github.com/infinityInfinite/secbird/pull/28), [#31](https://github.com/infinityInfinite/secbird/pull/31))
 - Cynosa V2
+- Huntsman Mini ([#85](https://github.com/infinityInfinite/secbird/issues/85))
+- Huntsman V2 Tenkeyless ([#88](https://github.com/infinityInfinite/secbird/issues/88))
 - Tartarus V2 ([#14](https://github.com/infinityInfinite/secbird/issues/14))
+
+**Headsets**
+- BlackShark V3 Pro, by the contributor who wrote its support ([#18](https://github.com/infinityInfinite/secbird/pull/18))
 
 **Accessories**
 - Mouse Dock ([#14](https://github.com/infinityInfinite/secbird/issues/14))
@@ -240,7 +278,6 @@ value the device answers with, so each entry can be checked against it before it
 A user said it works, but there's no `secbird report` yet. One from them moves it to verified.
 
 - Basilisk X HyperSpeed, on the 2.4 GHz dongle ([#10](https://github.com/infinityInfinite/secbird/issues/10))
-- Basilisk V3 Pro 35K Phantom Green Edition
 - BlackWidow V3 Mini HyperSpeed
 - Goliathus Chroma
 - Thunderbolt 4 Dock Chroma
@@ -248,16 +285,20 @@ A user said it works, but there's no `secbird report` yet. One from them moves i
 ### Partly working
 
 - Basilisk V4 Pro on the Mouse Dock Pro: DPI, polling, sleep and most buttons work ([#16](https://github.com/infinityInfinite/secbird/issues/16))
+- Mouse Dock V2 Pro: the mouse on it and the dock's light work; buttons and macros through the dock don't yet ([#61](https://github.com/infinityInfinite/secbird/issues/61), [#72](https://github.com/infinityInfinite/secbird/issues/72))
+- Tartarus Pro: lighting and the profile light work; key remapping doesn't yet ([#60](https://github.com/infinityInfinite/secbird/issues/60))
+- Huntsman V3 Pro TKL and Huntsman V2 Analog: the basic settings work; actuation height and other analog settings aren't in yet ([#86](https://github.com/infinityInfinite/secbird/issues/86), [#30](https://github.com/infinityInfinite/secbird/issues/30))
 
 ### Listed, waiting for reports
 
 About 260 more mice, keyboards, keypads, mousepads, laptops and accessories, including the
-Basilisk V4 Pro, Basilisk V4 HyperSpeed and Naga V3 Pro.
+Basilisk V4 Pro, Basilisk V4 HyperSpeed and the BlackShark V3 (non-Pro,
+[#15](https://github.com/infinityInfinite/secbird/issues/15)).
 
 ### Not supported yet
 
-- Headsets: Kraken, BlackShark V3 ([#15](https://github.com/infinityInfinite/secbird/issues/15))
-- Bluetooth connections ([#10](https://github.com/infinityInfinite/secbird/issues/10))
+- Headsets other than the BlackShark V3 Pro: Kraken, BlackShark V2 HyperSpeed ([#85](https://github.com/infinityInfinite/secbird/issues/85))
+- Bluetooth connections: a first try is in, untested ([#10](https://github.com/infinityInfinite/secbird/issues/10))
 - Laptop cooling pads
 - Chroma Addressable RGB Controller (shows up, but has no setup screen yet)
 
@@ -285,6 +326,13 @@ To try the editor without hardware, start the tray with simulated devices:
 $env:SECBIRD_SIM="all"   # or a list, e.g. "naga,blackwidow,blade,firefly,dock"
 .\target\release\secbird-tray.exe
 ```
+
+## Contributing
+
+Pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains what Secretarybird
+stands for (visible and safe, easy, light, new devices are easy to add, checkable), how the code
+is laid out, how to add a device or a feature, and the checklists every pull request goes
+through.
 
 ## Legal
 

@@ -95,6 +95,8 @@ pub struct SimState {
     pub live_brightness: BTreeMap<u8, u8>,
     /// Last effect per LED: `[effect, flags, rate, ...colors]`.
     pub effects: BTreeMap<u8, Vec<u8>>,
+    /// Effects written to a saved slot (not live-only), as `0F:82` reads them back.
+    pub saved_effects: BTreeMap<u8, Vec<u8>>,
     /// Per-key colors `rows x cols`, row-major.
     pub matrix: Option<(u8, u8, Vec<[u8; 3]>)>,
     /// Speaks the older `03:xx` lighting commands instead of `0F:xx`.
@@ -112,6 +114,8 @@ pub struct SimState {
     pub keys: BTreeMap<(u8, u8, u8), (u8, [u8; 5])>,
     /// Answer this many reads with Busy before the real reply.
     pub busy_reads: u32,
+    /// Scroll wheel settings by (class, SET command id, store): the value.
+    pub scroll: BTreeMap<(u8, u8, u8), u8>,
     /// Every well-formed command received, in order.
     pub log: Vec<Command>,
     reply: Option<Report>,
@@ -143,6 +147,7 @@ impl SimState {
             brightness: BTreeMap::new(),
             live_brightness: BTreeMap::new(),
             effects: BTreeMap::new(),
+            saved_effects: BTreeMap::new(),
             matrix: None,
             standard: false,
             led_on: BTreeMap::new(),
@@ -152,6 +157,7 @@ impl SimState {
             button_list: None,
             keys: BTreeMap::new(),
             busy_reads: 0,
+            scroll: BTreeMap::new(),
             log: Vec::new(),
             reply: None,
         }
@@ -494,8 +500,15 @@ impl SimState {
                     return ok(a[..size as usize].to_vec());
                 }
                 self.effects.insert(led, a[2..size as usize].to_vec());
+                if a[0] != cmd::NOSTORE {
+                    self.saved_effects.insert(led, a[2..size as usize].to_vec());
+                }
                 ok(a[..size as usize].to_vec())
             }
+            c if c == cmd::MATRIX_EFFECT.get() => match self.saved_effects.get(&a[1]) {
+                Some(e) => ok([&a[..2], &e[..]].concat()),
+                None => (NotSupported, vec![]),
+            },
             cmd::MATRIX_FRAME => {
                 let Some((rows, cols, frame)) = self.matrix.as_mut() else {
                     return (NotSupported, vec![]);
@@ -553,6 +566,20 @@ impl SimState {
                     frame[base + start + i] = [rgb[0], rgb[1], rgb[2]];
                 }
                 ok(vec![])
+            }
+            // Scroll wheel settings, `[store, value]`, by (class, SET id, store).
+            c if self.scroll.keys().any(|&(class, id, _)| class == c.class && id == c.id & 0x7F) => {
+                let key = (c.class, c.id & 0x7F, a[0]);
+                match c.id & 0x80 != 0 {
+                    true => match self.scroll.get(&key) {
+                        Some(&v) => ok(vec![a[0], v]),
+                        None => (Failed, vec![]),
+                    },
+                    false => {
+                        self.scroll.insert(key, a[1]);
+                        ok(a[..2].to_vec())
+                    }
+                }
             }
             _ => (NotSupported, vec![]),
         }
@@ -620,6 +647,20 @@ impl Sim {
         s.auto_sleep = Some(true);
         s.macros = Some(BTreeMap::new());
         s.leds = vec![4];
+        // A HyperScroll wheel as a Naga V3 Pro showed it: tactile, all modes in the cycle,
+        // acceleration and Smart-Reel off at medium.
+        for store in [0, 1] {
+            for (c, v) in [
+                (cmd::SCROLL_MODE, 0),
+                (cmd::SCROLL_MODES_ENABLED, 7),
+                (cmd::SCROLL_ACCELERATION, 0),
+                (cmd::SCROLL_ACCELERATION_LEVEL, 2),
+                (cmd::SMART_REEL, 0),
+                (cmd::SMART_REEL_LEVEL, 2),
+            ] {
+                s.scroll.insert((c.class, c.id, store), v);
+            }
+        }
         let mut factory: Vec<(u8, u8, [u8; 5])> = vec![
             (1, 1, [1, 0, 0, 0, 0]),
             (2, 1, [2, 0, 0, 0, 0]),
@@ -752,22 +793,30 @@ pub fn from_env() -> Vec<Device> {
         list => list.split(',').map(str::trim).collect(),
     };
     let db = crate::db::Db::builtin().unwrap_or_default();
-    names
-        .into_iter()
-        .filter_map(|name| {
-            let (sim, pid) = preset(name)?;
-            // Fake product ids carry their own spec; real ones use the device list, as for hardware.
-            let spec = Sim::spec_for(pid).or_else(|| db.get(pid).cloned());
-            let mut dev = sim.open(pid, spec)?;
-            dev.identify_receiver(&db);
-            Some(dev)
-        })
-        .collect()
+    names.into_iter().filter_map(|name| open_preset(name, &db)).collect()
+}
+
+/// One [`PRESETS`] device, opened as discovery would open the hardware.
+pub fn open_preset(name: &str, db: &crate::db::Db) -> Option<Device> {
+    if name == "headset" {
+        let path = CString::new("sim:headset").expect("no NUL");
+        let pid = crate::headset::PID;
+        return Device::open(Box::new(HeadsetSim::new()), pid, 5, path, &[], db.get(pid).cloned());
+    }
+    let (sim, pid) = preset(name)?;
+    // Fake product ids carry their own spec; real ones use the device list, as for hardware.
+    let spec = Sim::spec_for(pid).or_else(|| db.get(pid).cloned());
+    let mut dev = sim.open(pid, spec)?;
+    dev.identify_receiver(db);
+    Some(dev)
 }
 
 /// Every preset `SECBIRD_SIM=all` loads.
-pub const PRESETS: [&str; 14] =
-    ["mouse", "wireless", "keyboard", "old-keyboard", "naga", "cobra", "dock", "dock-v2", "hyperpolling", "blackwidow", "goliathus", "firefly", "blade", "base-station"];
+pub const PRESETS: [&str; 24] = [
+    "mouse", "wireless", "keyboard", "old-keyboard", "naga", "cobra", "dock", "dock-v2", "hyperpolling", "blackwidow",
+    "goliathus", "firefly", "blade", "base-station", "naga-v2-pro", "huntsman", "blackwidow-v4", "deathstalker-tkl",
+    "mini", "tartarus-pro", "tartarus-v2", "ornata", "blade-16", "headset",
+];
 
 /// A simulated device by name. The later ones copy devices users reported, under their real
 /// product ids, so the editor treats them exactly as it treats the hardware.
@@ -871,8 +920,193 @@ pub fn preset(name: &str) -> Option<(Sim, u16)> {
             s.matrix = Some((1, 8, vec![[0; 3]; 8]));
             (Sim::new(s), 0x0F20)
         }
+        // Naga V2 Pro over its receiver: logo, side grid and profile zones, battery.
+        "naga-v2-pro" => {
+            let sim = Sim::naga();
+            {
+                let mut s = sim.state();
+                s.serial = "SIMNAGAV2P01".into();
+                s.leds = vec![4, 5, 10];
+                s.battery = Some(0x9A);
+            }
+            (sim, 0x00A8)
+        }
+        // Huntsman V3 Pro: full-size 6 x 22 grid, gaming mode, high-speed polling.
+        "huntsman" => {
+            let mut s = SimState::new("SIMHUNTSMAN1");
+            s.txid = 0xFF;
+            s.polling_hs = Some(0x08);
+            s.game_mode = Some(0);
+            s.leds = vec![5];
+            s.matrix = Some((6, 22, vec![[0; 3]; 6 * 22]));
+            (Sim::new(s), 0x02A6)
+        }
+        // BlackWidow V4: 8 x 23 grid with the underglow strip and macro column.
+        "blackwidow-v4" => {
+            let mut s = SimState::new("SIMBWV4FULL1");
+            s.txid = 0xFF;
+            s.game_mode = Some(0);
+            s.leds = vec![5];
+            s.matrix = Some((8, 23, vec![[0; 3]; 8 * 23]));
+            (Sim::new(s), 0x0287)
+        }
+        // DeathStalker V2 Pro TKL, wireless: low-profile 6 x 17 grid, battery.
+        "deathstalker-tkl" => {
+            let mut s = SimState::new("SIMDSV2TKL01");
+            s.txid = 0x9F;
+            s.battery = Some(0x40);
+            s.leds = vec![5];
+            s.matrix = Some((6, 17, vec![[0; 3]; 6 * 17]));
+            (Sim::new(s), 0x0296)
+        }
+        // BlackWidow V4 Mini HyperSpeed, wireless: 65 % layout, 5 x 14.
+        "mini" => {
+            let mut s = SimState::new("SIMBWMINI001");
+            s.txid = 0x9F;
+            s.battery = Some(0xC8);
+            s.charging = true;
+            s.leds = vec![5];
+            s.matrix = Some((5, 14, vec![[0; 3]; 5 * 14]));
+            (Sim::new(s), 0x02BA)
+        }
+        // Tartarus Pro keypad, issue #60: one row of 21 keys and a profile LED.
+        "tartarus-pro" => {
+            let mut s = SimState::new("SIMTARTPRO01");
+            s.txid = 0xFF;
+            s.leds = vec![5, 11];
+            s.matrix = Some((1, 21, vec![[0; 3]; 21]));
+            (Sim::new(s), 0x0244)
+        }
+        // Tartarus V2 keypad: 4 x 6 grid.
+        "tartarus-v2" => {
+            let mut s = SimState::new("SIMTARTV2001");
+            s.txid = 0xFF;
+            s.leds = vec![5];
+            s.matrix = Some((4, 6, vec![[0; 3]; 4 * 6]));
+            (Sim::new(s), 0x022B)
+        }
+        // Ornata V3: ten lighting zones in one row, not per key.
+        "ornata" => {
+            let mut s = SimState::new("SIMORNATAV31");
+            s.txid = 0xFF;
+            s.leds = vec![5];
+            s.matrix = Some((1, 10, vec![[0; 3]; 10]));
+            (Sim::new(s), 0x02A1)
+        }
+        // Blade 16 (2025): older lighting commands, 6 x 17 keyboard and the lid logo.
+        "blade-16" => {
+            let mut s = SimState::new("SIMBLADE1625");
+            s.standard = true;
+            s.leds = vec![5, 4];
+            s.matrix = Some((6, 17, vec![[0; 3]; 6 * 17]));
+            s.smart_dimming = Some((0, 0));
+            (Sim::new(s), 0x02C6)
+        }
         _ => return None,
     })
+}
+
+/// A BlackShark V3 Pro on its wireless dongle, answering the headset's own 64-byte output and
+/// input reports ([`crate::headset`]) the way #18 describes the real one. Settings stick, so
+/// the editor's changes read back.
+#[derive(Clone)]
+pub struct HeadsetSim(Arc<Mutex<HeadsetState>>);
+
+struct HeadsetState {
+    /// Value bytes by GET command; EQ slots by slot number.
+    values: BTreeMap<u8, Vec<u8>>,
+    eq: [[u8; 10]; 6],
+    /// Each slot's EQ order entry (`60`): [slot, voice, enabled, active, 0, 0].
+    order: [[u8; 6]; 6],
+    pending: Option<[u8; 64]>,
+}
+
+impl HeadsetSim {
+    pub fn new() -> Self {
+        let flat = [128u8; 10]; // the headset sends -0 for a flat band
+        let mut eq = [flat; 6];
+        eq[1] = [3, 2, 1, 128, 128, 128, 1, 2, 3, 3]; // a "bass and treble" slot
+        let mut order = [[0u8; 6]; 6];
+        for (slot, o) in order.iter_mut().enumerate() {
+            *o = [slot as u8, 0, 1, u8::from(slot == 0), 0, 0];
+        }
+        let values = BTreeMap::from([
+            (crate::headset::BATTERY, vec![76]),
+            (crate::headset::CHARGING, vec![0]),
+            (0x12, vec![1, 6]),  // noise cancelling on, level 6
+            (0x13, vec![0]),
+            (0x16, vec![32]),
+            (0x17, vec![128; 10]),
+            (0x19, vec![40]),
+            (0x55, vec![0]),
+            (0x2C, vec![15]),
+        ]);
+        HeadsetSim(Arc::new(Mutex::new(HeadsetState { values, eq, order, pending: None })))
+    }
+}
+
+impl Default for HeadsetSim {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Transport for HeadsetSim {
+    fn send_feature_report(&self, _: &[u8]) -> Result<()> {
+        Err(Error::Unsupported("the headset has no feature reports".into()))
+    }
+    fn get_feature_report(&self, _: &mut [u8]) -> Result<usize> {
+        Err(Error::Unsupported("the headset has no feature reports".into()))
+    }
+    fn send_output_report(&self, data: &[u8]) -> Result<()> {
+        if data.len() != 64 || data[0] != 2 || data[2] != 0x60 || data[9] != 0x80 {
+            return Err(Error::InvalidArg("simulated headset: bad output report".into()));
+        }
+        let (command, n) = (data[10], data[12] as usize);
+        let args = data[13..13 + n.min(49)].to_vec();
+        let mut s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = |a: &[u8]| a.first().map(|&x| x as usize).filter(|&x| x < 6);
+        let answer: Option<Vec<u8>> = match command {
+            0x15 => slot(&args).map(|i| [vec![i as u8], s.eq[i].to_vec()].concat()),
+            0x60 => slot(&args).map(|i| s.order[i].to_vec()),
+            0x95 if args.len() == 11 => slot(&args).map(|i| { s.eq[i].copy_from_slice(&args[1..]); args.clone() }),
+            0xE0 if args.len() == 6 => slot(&args).map(|i| { s.order[i].copy_from_slice(&args); args.clone() }),
+            0xE1 => Some(args.clone()),
+            set if set & 0x80 != 0 => {
+                // SETs: 92 anc, 93, 96, 97, 99, AC auto-off.
+                let get = match set { 0xAC => 0x2C, other => other & 0x7F };
+                s.values.contains_key(&get).then(|| { s.values.insert(get, args.clone()); args.clone() })
+            }
+            get => s.values.get(&get).cloned(),
+        };
+        let mut reply = [0u8; 64];
+        reply[..13].copy_from_slice(&data[..13]);
+        reply[11] = 1;
+        match answer {
+            Some(v) => {
+                reply[1] = 2; // success
+                reply[12] = v.len() as u8;
+                reply[13..13 + v.len()].copy_from_slice(&v);
+            }
+            None => {
+                reply[1] = 5; // not supported
+                reply[12] = 0;
+            }
+        }
+        reply[6] = 4 + reply[12];
+        reply[62] = reply[..62].iter().fold(0, |crc, b| crc ^ b);
+        s.pending = Some(reply);
+        Ok(())
+    }
+    fn read_timeout(&self, buf: &mut [u8], _timeout_ms: i32) -> Result<usize> {
+        let Some(reply) = self.0.lock().unwrap_or_else(|e| e.into_inner()).pending.take() else { return Ok(0) };
+        let n = buf.len().min(64);
+        buf[..n].copy_from_slice(&reply[..n]);
+        Ok(n)
+    }
+    fn read_delay(&self) -> Duration {
+        Duration::ZERO
+    }
 }
 
 /// Every key in [`crate::buttons::KEYS`] typing itself, in the live and saved slot, on both
@@ -909,6 +1143,24 @@ mod tests {
     }
 
     #[test]
+    fn simulated_headset_reads_and_keeps_settings() {
+        let dev = open_preset("headset", &crate::db::Db::builtin().unwrap()).expect("the simulated headset opens");
+        assert_eq!(dev.name(), "BlackShark V3 Pro (Wireless)");
+        assert_eq!(dev.battery().unwrap(), Some(76));
+        let (settings, errors) = dev.audio_state();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(settings["anc"], vec![1, 6]);
+        assert_eq!(settings["eq-preset"], vec![0]);
+        assert_eq!(settings["eq-1"][0], 3);
+        dev.audio_set("sidetone", &[70]).unwrap();
+        dev.audio_set("eq-2", &[-3, -2, 0, 0, 1, 2, 3, 4, 5, 6]).unwrap();
+        dev.audio_set("eq-preset", &[2]).unwrap();
+        assert_eq!(dev.audio_read("sidetone").unwrap(), vec![70]);
+        assert_eq!(dev.audio_read("eq-2").unwrap(), vec![-3, -2, 0, 0, 1, 2, 3, 4, 5, 6]);
+        assert_eq!(dev.audio_read("eq-preset").unwrap(), vec![2]);
+    }
+
+    #[test]
     fn discovery_finds_each_txid() {
         for (sim, pid, txid) in [
             (Sim::mouse(), MOUSE_PID, 0x1F),
@@ -936,6 +1188,79 @@ mod tests {
         assert_eq!(dev.firmware().unwrap(), (1, 2));
         sim.state().busy_reads = 100;
         assert!(matches!(dev.firmware(), Err(Error::NoReply(_))));
+    }
+
+    #[test]
+    fn naga_scroll_wheel_settings() {
+        use crate::{Assist, ScrollMode};
+        let sim = Sim::naga();
+        let dev = open(&sim, NAGA_PID);
+        let wheel = dev.scroll_wheel().unwrap().unwrap();
+        assert_eq!((wheel.mode, wheel.precision), (ScrollMode::Tactile, true));
+        assert!(wheel.disabled.is_empty());
+        assert_eq!((wheel.acceleration, wheel.smart_reel), (Assist::Off, Assist::Off));
+
+        dev.set_scroll_mode(ScrollMode::PrecisionTactile).unwrap();
+        dev.set_scroll_acceleration(Assist::On(4)).unwrap();
+        dev.set_smart_reel(Assist::On(0)).unwrap();
+        dev.set_scroll_disabled(&[ScrollMode::FreeSpin]).unwrap();
+        let wheel = dev.scroll_wheel().unwrap().unwrap();
+        assert_eq!(wheel.mode, ScrollMode::PrecisionTactile);
+        assert_eq!(wheel.disabled, [ScrollMode::FreeSpin]);
+        assert_eq!((wheel.acceleration, wheel.smart_reel), (Assist::On(4), Assist::On(0)));
+        // Live store and the saved slot both get it; the mask leaves free-spin out.
+        let scroll = |c: Command, store| sim.state().scroll[&(c.class, c.id, store)];
+        assert_eq!((scroll(cmd::SCROLL_MODES_ENABLED, 0), scroll(cmd::SCROLL_MODES_ENABLED, 1)), (5, 5));
+
+        // The mode in use can't be skipped, nor all three; switching to a skipped mode
+        // puts it back in the cycle.
+        assert!(dev.set_scroll_disabled(&[ScrollMode::PrecisionTactile]).is_err());
+        assert!(dev.set_scroll_disabled(&[ScrollMode::Tactile, ScrollMode::FreeSpin, ScrollMode::PrecisionTactile]).is_err());
+        dev.set_scroll_mode(ScrollMode::FreeSpin).unwrap();
+        assert!(dev.scroll_wheel().unwrap().unwrap().disabled.is_empty());
+
+        // A mouse without the commands has no scroll wheel settings.
+        assert_eq!(open(&Sim::mouse(), MOUSE_PID).scroll_wheel().unwrap(), None);
+    }
+
+    #[test]
+    fn profile_skips_the_mode_the_mouse_was_in() {
+        use crate::{ScrollMode, ScrollSettings};
+        // The mouse is in precision tactile; the profile wants tactile with precision skipped
+        // (the Reddit Naga V3 Pro case, the other way round). Skipping first would be refused.
+        let sim = Sim::naga();
+        let dev = open(&sim, NAGA_PID);
+        dev.set_scroll_mode(ScrollMode::PrecisionTactile).unwrap();
+        let p = Profile {
+            scroll: ScrollSettings { mode: Some(ScrollMode::Tactile), disabled: Some(vec![ScrollMode::PrecisionTactile]), ..Default::default() },
+            ..Default::default()
+        };
+        let failed: Vec<_> = p.apply(&dev).into_iter().filter(|a| a.result.is_err()).map(|a| a.setting).collect();
+        assert!(failed.is_empty(), "{failed:?}");
+        let wheel = dev.scroll_wheel().unwrap().unwrap();
+        assert_eq!((wheel.mode, wheel.disabled), (ScrollMode::Tactile, vec![ScrollMode::PrecisionTactile]));
+    }
+
+    #[test]
+    fn older_wheel_switches_assists_without_levels() {
+        use crate::Assist;
+        // Tactile/free-spin only (02:14), acceleration and Smart-Reel on/off with no level
+        // commands, as OpenRazer lists the Basilisk V3.
+        let sim = Sim::mouse();
+        for store in [0, 1] {
+            for c in [cmd::SCROLL_MODE_OLD, cmd::SCROLL_ACCELERATION, cmd::SMART_REEL] {
+                sim.state().scroll.insert((c.class, c.id, store), 0);
+            }
+        }
+        let dev = open(&sim, MOUSE_PID);
+        let wheel = dev.scroll_wheel().unwrap().unwrap();
+        assert!(!wheel.precision);
+        dev.set_smart_reel(Assist::On(2)).unwrap();
+        dev.set_scroll_acceleration(Assist::On(4)).unwrap();
+        let wheel = dev.scroll_wheel().unwrap().unwrap();
+        assert!(matches!(wheel.smart_reel, Assist::On(_)) && matches!(wheel.acceleration, Assist::On(_)));
+        dev.set_smart_reel(Assist::Off).unwrap();
+        assert_eq!(dev.scroll_wheel().unwrap().unwrap().smart_reel, Assist::Off);
     }
 
     #[test]
@@ -1194,7 +1519,8 @@ mod tests {
     #[test]
     fn every_preset_opens_with_its_real_spec() {
         let db = crate::db::Db::builtin().unwrap();
-        for name in PRESETS {
+        // The headset speaks its own protocol: its own test above.
+        for name in PRESETS.into_iter().filter(|&n| n != "headset") {
             let (sim, pid) = preset(name).unwrap();
             let spec = Sim::spec_for(pid).or_else(|| db.get(pid).cloned());
             assert!(spec.is_some(), "{name}: no spec");
@@ -1580,6 +1906,24 @@ mod tests {
 
         let mouse = open(&Sim::mouse(), MOUSE_PID);
         assert_eq!(mouse.game_mode().unwrap(), None, "not a keyboard");
+    }
+
+    #[test]
+    fn a_colour_on_a_zone_left_at_zero_brightness_lights_it() {
+        let sim = Sim::mouse();
+        let dev = open(&sim, MOUSE_PID);
+        let dir = std::env::temp_dir().join(format!("secbird-dark-{}", std::process::id()));
+        let mut store = crate::Store::load(&dir.join("profiles.json")).unwrap();
+        dev.set_brightness(1, 0).unwrap();
+        crate::actions::set_color(&dev, &mut store, "scroll", Rgb(255, 0, 0)).unwrap();
+        assert_eq!(dev.brightness(1).unwrap(), 100, "#30: dark zone brought up to 100 %");
+        assert_eq!(store.for_device(&dev).active_mut().lighting["scroll"].brightness, Some(100));
+
+        // A brightness the user chose stays, even 0.
+        crate::actions::set_brightness(&dev, &mut store, "scroll", 0).unwrap();
+        crate::actions::set_color(&dev, &mut store, "scroll", Rgb(0, 255, 0)).unwrap();
+        assert_eq!(dev.brightness(1).unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -6,6 +6,8 @@ use crate::error::{Error, Result};
 use crate::proto::{Command, Report, Status, REPORT_LEN};
 use crate::transport::Transport;
 use hidapi::HidApi;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::ffi::CString;
 use std::thread::sleep;
 
@@ -15,6 +17,9 @@ const READ_RETRIES: u32 = 30;
 /// Writes to the device's flash (macros) take longer: Synapse waits at least 10 ms between
 /// reads and retries 40 times. Allow up to about two seconds.
 const FLASH_RETRIES: u32 = 200;
+
+/// How many times [`Device::transact_echo`] sends a request before giving up.
+const ECHO_SENDS: u32 = 3;
 
 /// Transaction ids seen across Razer devices, tried in order when the database has none.
 pub const TXID_CANDIDATES: [u8; 4] = [0x1F, 0x3F, 0xFF, 0x9F];
@@ -28,6 +33,10 @@ pub struct Device {
     pub path: CString,
     pub txid: u8,
     pub spec: Option<DeviceSpec>,
+    /// Headset settings read once, then served from memory until a write or rescan.
+    /// The tray editor reloads device state on every focus and after every change;
+    /// without this each reload costs ~20 HID round trips.
+    pub(crate) audio_cache: RefCell<Option<(crate::headset::Settings, BTreeMap<String, String>)>>,
 }
 
 impl Device {
@@ -119,17 +128,72 @@ impl Device {
     /// Send one command and wait for its reply. `size` is the argument length the
     /// device expects for this command.
     pub fn transact(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES, false)
+        if crate::headset::is_headset(self.pid) {
+            return Err(Error::Unsupported("this headset speaks HID audio reports, not Protocol 2.5".into()));
+        }
+        transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES, false, &[])
+    }
+
+    /// [`Device::transact`] that only takes a reply echoing `args[..echo]`. A dock, or
+    /// Synapse talking to the same mouse, can hand back the reply to another request with
+    /// the same command (seen on a Naga V3 Pro on a Mouse Dock Pro). Asks again if no
+    /// reply fits.
+    pub(crate) fn transact_echo(&self, command: Command, size: u8, args: &[u8], echo: usize) -> Result<Report> {
+        let echo = &args[..echo.min(args.len())];
+        let mut result = Err(Error::NoReply(command));
+        for _ in 0..ECHO_SENDS {
+            result = transact(self.transport.as_ref(), self.txid, command, size, args, READ_RETRIES, false, echo);
+            if !matches!(result, Err(Error::NoReply(_))) {
+                break;
+            }
+        }
+        result
+    }
+
+    /// [`Device::transact_echo`] for a GET.
+    pub(crate) fn get_echo(&self, command: Command, size: u8, args: &[u8], echo: usize) -> Result<Report> {
+        self.transact_echo(command.get(), size, args, echo)
+    }
+
+    /// Send one command without reading the reply: for streamed lighting frames, where the
+    /// next frame replaces this one anyway. On the Basilisk V3 this reaches 111 frames a
+    /// second with the device still answering after (RGB plan, phase 0).
+    pub(crate) fn send_only(&self, command: Command, size: u8, args: &[u8]) -> Result<()> {
+        self.send_only_as(self.txid, command, size, args)
+    }
+
+    /// [`Device::send_only`] with another transaction id (see [`DOCK_TXID`]).
+    pub(crate) fn send_only_as(&self, txid: u8, command: Command, size: u8, args: &[u8]) -> Result<()> {
+        let req = Report::request(txid, command, size, args);
+        let mut buf = [0u8; REPORT_LEN + 1];
+        buf[1..].copy_from_slice(&req.0);
+        self.transport.send_feature_report(&buf)
+    }
+
+    /// A read-only GET on a headset's own protocol ([`crate::headset`]).
+    pub(crate) fn headset_query(&self, command: u8) -> Result<u8> {
+        if !crate::headset::is_headset(self.pid) {
+            return Err(Error::Unsupported("HID audio reports on this device".into()));
+        }
+        crate::headset::query(self.transport.as_ref(), command)
+    }
+
+    /// One headset request with arguments, answered by the headset.
+    pub(crate) fn headset_transact(&self, command: u8, args: &[u8]) -> Result<Vec<u8>> {
+        if !crate::headset::is_headset(self.pid) {
+            return Err(Error::Unsupported("HID audio reports on this device".into()));
+        }
+        crate::headset::transact(self.transport.as_ref(), command, args)
     }
 
     /// [`Device::transact`] for commands that write flash and answer slowly.
     pub(crate) fn transact_slow(&self, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES, false)
+        transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES, false, &[])
     }
 
     /// [`Device::transact`] with another transaction id (see [`DOCK_TXID`]).
     pub fn transact_as(&self, txid: u8, command: Command, size: u8, args: &[u8]) -> Result<Report> {
-        transact(self.transport.as_ref(), txid, command, size, args, READ_RETRIES, true)
+        transact(self.transport.as_ref(), txid, command, size, args, READ_RETRIES, true, &[])
     }
 
     /// Whether this is a mouse dock, whose own settings take [`DOCK_TXID`].
@@ -195,8 +259,19 @@ fn connected_mouse_pid(args: &[u8]) -> Option<u16> {
 }
 
 /// `exact`: only accept a reply carrying our txid. A dock forwards the docked mouse's
-/// replies, which would otherwise pass for the dock's own.
-fn transact(hid: &dyn Transport, txid: u8, command: Command, size: u8, args: &[u8], retries: u32, exact: bool) -> Result<Report> {
+/// replies, which would otherwise pass for the dock's own. `echo`: only accept a reply
+/// whose arguments start with these bytes.
+#[allow(clippy::too_many_arguments)]
+fn transact(
+    hid: &dyn Transport,
+    txid: u8,
+    command: Command,
+    size: u8,
+    args: &[u8],
+    retries: u32,
+    exact: bool,
+    echo: &[u8],
+) -> Result<Report> {
     let req = Report::request(txid, command, size, args);
     let mut buf = [0u8; REPORT_LEN + 1]; // byte 0 is the HID report id (0)
     buf[1..].copy_from_slice(&req.0);
@@ -215,7 +290,14 @@ fn transact(hid: &dyn Transport, txid: u8, command: Command, size: u8, args: &[u
         if rep.command() != command || (exact && rep.txid() != txid) {
             continue;
         }
-        match rep.status() {
+        // The echo check only sorts out successful replies meant for another request. A
+        // refusal ends the wait as it is: it need not repeat the arguments, and skipping it
+        // would turn "not supported" into a slow "no reply" after every resend.
+        let status = rep.status();
+        if !rep.args().starts_with(echo) && matches!(status, Status::Success | Status::Busy | Status::New) {
+            continue;
+        }
+        match status {
             Status::Success => return Ok(rep),
             Status::Busy | Status::New => continue,
             status => return Err(Error::Device { cmd: command, status }),
@@ -236,6 +318,8 @@ pub fn candidates(api: &HidApi) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = api
         .device_list()
         .filter(|d| d.vendor_id() == RAZER_VID)
+        // Audio headsets only speak their own protocol, and only on the vendor collection.
+        .filter(|d| !crate::headset::is_headset(d.product_id()) || (d.usage_page() == 0xFF14 && d.usage() == 1))
         .map(|d| Candidate {
             pid: d.product_id(),
             interface: d.interface_number(),
@@ -335,11 +419,18 @@ impl Device {
         txids: &[u8],
         spec: Option<DeviceSpec>,
     ) -> Option<Device> {
+        if crate::headset::is_headset(pid) {
+            // Headsets have no Protocol 2.5 serial; a battery read proves it answers, and
+            // gives the device its key along the way.
+            let dev = Device { transport, pid, serial: String::new(), interface, path, txid: 0x60, spec, audio_cache: RefCell::new(None) };
+            dev.headset_query(crate::headset::BATTERY).ok()?;
+            return Some(dev);
+        }
         let (txid, reply) = txids.iter().copied().find_map(|t| {
-            transact(transport.as_ref(), t, cmd::SERIAL.get(), cmd::SERIAL_SIZE, &[], READ_RETRIES, false).ok().map(|r| (t, r))
+            transact(transport.as_ref(), t, cmd::SERIAL.get(), cmd::SERIAL_SIZE, &[], READ_RETRIES, false, &[]).ok().map(|r| (t, r))
         })?;
         let serial = parse_serial(reply.args());
-        Some(Device { transport, pid, serial, interface, path, txid, spec })
+        Some(Device { transport, pid, serial, interface, path, txid, spec, audio_cache: RefCell::new(None) })
     }
 }
 

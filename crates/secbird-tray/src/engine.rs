@@ -2,6 +2,8 @@
 
 use crate::wake_sync::Peer;
 use secbird_core::{config_dir, discover, effects::Effect, hidapi::HidApi, Db, Device, Dimming, Result, Store};
+use crate::studio::Studio;
+use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -27,6 +29,9 @@ pub struct Engine {
     relight: HashMap<String, Instant>,
     /// Devices that didn't answer [`Engine::lights_away`], and until when to keep trying.
     dim: HashMap<String, Instant>,
+    /// Layered lighting streamed while the tray runs. In a cell because applying a profile
+    /// (`&self`) has to tell it to start its stream over.
+    studio: RefCell<Studio>,
 }
 
 const FINDER_PAUSE: Duration = Duration::from_secs(10 * 60);
@@ -119,6 +124,7 @@ impl Engine {
             away: None,
             relight: HashMap::new(),
             dim: HashMap::new(),
+            studio: RefCell::new(Studio::default()),
         })
     }
 
@@ -334,7 +340,8 @@ impl Engine {
                     !s.wireless && matches!(s.kind, secbird_core::Kind::Keyboard | secbird_core::Kind::Keypad)
                 })
         });
-        for dev in wired_boards {
+        let studio = self.studio.borrow();
+        for dev in wired_boards.filter(|d| !studio.is_streaming(&d.key())) {
             let p = store.for_device(dev);
             let name = p.effective(self.foreground()).to_string();
             p.refresh_frame(&name, dev);
@@ -489,6 +496,9 @@ impl Engine {
         self.unsupported = secbird_core::device::unanswered(&self.api, &self.devices)
             .into_iter()
             .map(|pid| match db.get(pid) {
+                Some(spec) if secbird_core::headset::is_headset(pid) => {
+                    Unsupported { pid, name: spec.name.clone(), reason: "Not answering. Is it switched on? Is Synapse running?" }
+                }
                 Some(spec) if spec.lighting == secbird_core::Lighting::Kraken => {
                     Unsupported { pid, name: spec.name.clone(), reason: "Headset protocol not supported yet" }
                 }
@@ -533,6 +543,7 @@ impl Engine {
     /// Apply the current profile of each listed device (by [`Device::key`]): the one tied
     /// to the program in front, else the active one.
     pub fn apply(&self, keys: &[String]) -> Vec<ApplyReport> {
+        self.studio.borrow_mut().restart(keys);
         let mut store = Self::store();
         self.devices
             .iter()
@@ -613,6 +624,46 @@ impl Engine {
         store.for_device(dev).switch(name)?;
         store.save()?;
         Ok(self.apply(&[key.to_string()]))
+    }
+
+    pub fn studio(&self) -> RefMut<'_, Studio> {
+        self.studio.borrow_mut()
+    }
+
+    /// One frame of layered lighting for every device that has some ([`Studio::tick`]).
+    /// Devices whose scene just ended get their profile again, so they show their own
+    /// lighting; returned for the failure notes.
+    pub fn studio_tick(&self) -> Vec<ApplyReport> {
+        let paused = self.frames_paused_until.is_some_and(|t| Instant::now() < t);
+        let path = config_dir().join("profiles.json");
+        let ended = {
+            let mut studio = self.studio.borrow_mut();
+            studio.tick(&self.devices, self.foreground(), &path, self.away.is_some(), paused);
+            for key in std::mem::take(&mut studio.gave_up) {
+                secbird_core::log::append(&format!("lighting: {} stopped taking frames, trying again every 5 s", self.names(&[key])));
+            }
+            std::mem::take(&mut studio.ended)
+        };
+        self.lights_after_stream(&ended)
+    }
+
+    /// Devices that stopped streaming: their saved effect shown again, then the profile on
+    /// top, so none stays on the last frame.
+    fn lights_after_stream(&self, keys: &[String]) -> Vec<ApplyReport> {
+        if keys.is_empty() {
+            return Vec::new();
+        }
+        for dev in self.devices.iter().filter(|d| keys.contains(&d.key())) {
+            dev.show_saved_lighting();
+        }
+        self.apply(keys)
+    }
+
+    /// Exit: every device that streams gets its own lighting back, so none freezes on the
+    /// last frame.
+    pub fn studio_stop(&self) {
+        let keys = self.studio.borrow_mut().stop_all();
+        self.lights_after_stream(&keys);
     }
 
     /// Menu/tooltip label: the name, plus a serial tail when several units share it.

@@ -368,6 +368,9 @@ impl Device {
 
     /// Battery percentage, or `None` for wired-only devices.
     pub fn battery(&self) -> Result<Option<u8>> {
+        if crate::headset::is_headset(self.pid) {
+            return self.headset_query(crate::headset::BATTERY).map(Some);
+        }
         if !self.spec.as_ref().is_some_and(|s| s.wireless) {
             return Ok(None);
         }
@@ -376,6 +379,9 @@ impl Device {
     }
 
     pub fn charging(&self) -> Result<bool> {
+        if crate::headset::is_headset(self.pid) {
+            return self.headset_query(crate::headset::CHARGING).map(|n| n != 0);
+        }
         let r = self.get(cmd::CHARGING, cmd::POWER_SIZE, &[])?;
         Ok(r.args()[1] != 0)
     }
@@ -399,7 +405,7 @@ impl Device {
         }
     }
 
-    fn lighting(&self) -> Lighting {
+    pub(crate) fn lighting(&self) -> Lighting {
         self.spec.as_ref().map_or(Lighting::Extended, |s| s.lighting)
     }
 
@@ -586,6 +592,110 @@ mod tests {
         assert_eq!(snap(1020, 100, 26000, 50), 1000);
         assert_eq!(snap(50, 100, 26000, 50), 100);
         assert_eq!(snap(30000, 100, 26000, 50), 26000);
+    }
+
+    /// RGB plan phase 0 on a real Basilisk V3 (0099): `cargo test -p secbird-core
+    /// real_v3_frames -- --ignored --nocapture`. Watch the mouse. 1) one LED at a time, red,
+    /// 2 s each, over 11 columns (OpenRGB's 1x11 layout); 2) which column counts it takes;
+    /// 3) frames per second with and without waiting for replies. Nothing is saved.
+    #[test]
+    #[ignore]
+    fn real_v3_frames() {
+        use std::time::{Duration, Instant};
+        let api = crate::hidapi::HidApi::new().unwrap();
+        let mut dev = crate::discover(&api, &crate::Db::builtin().unwrap())
+            .into_iter()
+            .find(|d| d.pid == 0x0099)
+            .expect("a Basilisk V3 plugged in");
+        let set_cols = |dev: &mut Device, cols: u8| {
+            dev.spec.as_mut().unwrap().matrix = Some(crate::db::Matrix { rows: 1, cols, first: 0 });
+        };
+        set_cols(&mut dev, 11);
+        let black = Rgb(0, 0, 0);
+
+        println!("walk: column 0..10, red, 2 s each");
+        for col in 0..11 {
+            let mut frame = vec![black; 11];
+            frame[col] = Rgb(255, 0, 0);
+            let t = Instant::now();
+            let r = dev.show_frame(&frame);
+            println!("  column {col:2}: {r:?} ({} ms)", t.elapsed().as_millis());
+            std::thread::sleep(Duration::from_secs(2));
+        }
+
+        println!("widths: does the mouse take more than 11 columns?");
+        for cols in [9u8, 11, 12, 13, 14, 16, 20, 25] {
+            set_cols(&mut dev, cols);
+            println!("  {cols:2} columns: {:?}", dev.set_row(0, 0, &vec![Rgb(0, 0, 40); cols as usize]));
+        }
+        set_cols(&mut dev, 11);
+
+        let rainbow = |i: usize| -> Vec<Rgb> {
+            (0..11)
+                .map(|c| {
+                    let h = ((i * 6 + c * 24) % 360) as f32 / 60.0;
+                    let x = (255.0 * (1.0 - (h % 2.0 - 1.0).abs())) as u8;
+                    match h as u32 {
+                        0 => Rgb(255, x, 0),
+                        1 => Rgb(x, 255, 0),
+                        2 => Rgb(0, 255, x),
+                        3 => Rgb(0, x, 255),
+                        4 => Rgb(x, 0, 255),
+                        _ => Rgb(255, 0, x),
+                    }
+                })
+                .collect()
+        };
+        dev.show_frame(&rainbow(0)).unwrap();
+        let n = 300;
+        let t = Instant::now();
+        let mut failed = 0;
+        for i in 0..n {
+            failed += dev.set_row(0, 0, &rainbow(i)).is_err() as u32;
+        }
+        let s = t.elapsed().as_secs_f64();
+        println!("with replies: {n} frames in {s:.2} s = {:.0} fps, {failed} failed", n as f64 / s);
+
+        let t = Instant::now();
+        let mut failed = 0;
+        for i in 0..n {
+            let mut args = vec![0x00, 0x00, 0x00, 0x00, 10];
+            args.extend(rainbow(i).iter().flat_map(|c| [c.0, c.1, c.2]));
+            failed += dev.send_only(cmd::MATRIX_FRAME, args.len() as u8, &args).is_err() as u32;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let s = t.elapsed().as_secs_f64();
+        println!("no replies, 1 ms gap: {n} frames in {s:.2} s = {:.0} fps, {failed} failed", n as f64 / s);
+        std::thread::sleep(Duration::from_millis(50));
+        println!("still answers after: {:?}", dev.firmware());
+        println!("done: restart the tray or switch profiles to get your lighting back");
+    }
+
+    /// Phase 0, second look: four stages of 8 s, black for 2 s between them, so the user can
+    /// follow by the clock. `cargo test -p secbird-core real_v3_layout -- --ignored`.
+    #[test]
+    #[ignore]
+    fn real_v3_layout() {
+        use std::time::Duration;
+        let api = crate::hidapi::HidApi::new().unwrap();
+        let mut dev = crate::discover(&api, &crate::Db::builtin().unwrap())
+            .into_iter()
+            .find(|d| d.pid == 0x0099)
+            .expect("a Basilisk V3 plugged in");
+        dev.spec.as_mut().unwrap().matrix = Some(crate::db::Matrix { rows: 1, cols: 11, first: 0 });
+        let (k, r, g, b) = (Rgb(0, 0, 0), Rgb(255, 0, 0), Rgb(0, 255, 0), Rgb(0, 0, 255));
+        let stages: [Vec<Rgb>; 4] = [
+            (0..11).map(|c| if c == 0 { g } else { k }).collect(),
+            (0..11).map(|c| if c == 1 { g } else { k }).collect(),
+            (0..11).map(|c| if c < 2 { k } else if c % 2 == 0 { r } else { b }).collect(),
+            (0..11).map(|c| if c < 2 { k } else if c < 7 { r } else { b }).collect(),
+        ];
+        for frame in stages {
+            dev.show_frame(&[k; 11]).unwrap();
+            std::thread::sleep(Duration::from_secs(2));
+            dev.show_frame(&frame).unwrap();
+            std::thread::sleep(Duration::from_secs(8));
+        }
     }
 
     #[test]

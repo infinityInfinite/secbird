@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Secretarybird: Razer gear, minus the bloat</title>
-<meta name="description" content="A free, tiny replacement for Razer Synapse on Windows. Lighting, DPI and profiles without background services, pop-ups or ads.">
+<meta name="description" content="A free, tiny replacement for Razer Synapse on Windows. Lighting in layers, DPI, buttons, scroll wheel, headset and profiles, without background services, pop-ups or ads.">
 <link rel="icon" type="image/png" href="favicon.png">
 <meta property="og:title" content="Secretarybird">
 <meta property="og:description" content="Your Razer gear, minus the bloat. Free and open source, for Windows.">
-<meta property="og:image" content="https://infinityinfinite.github.io/secbird/overview.webp">
+<meta property="og:image" content="https://infinityinfinite.github.io/secbird/studio.webp">
 <style>
   :root {
     --bg: #0c0c0e; --panel: #15151a; --line: #26262e; --text: #f2f2f4; --muted: #9a9ca3;
@@ -41,7 +41,7 @@
   .shot { margin: 28px auto 0; }
   .shot img { width: 100%; height: auto; display: block; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 30px 80px #0007; }
   .shot figcaption { text-align: center; color: var(--muted); font-size: 13px; margin-top: 10px; }
-  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 26px 18px; }
   .shots figure { margin: 0; }
   .shots img { width: 100%; height: auto; display: block; border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 18px 50px #0006; }
   .shots figcaption { color: var(--muted); font-size: 14.5px; margin-top: 10px; }
@@ -64,6 +64,12 @@
   .note p + p { margin-top: 8px; color: var(--muted); font-size: 15.5px; }
   .btn2 { display: inline-block; margin-top: 14px; padding: 10px 18px; border: 1px solid var(--line); border-radius: 10px; text-decoration: none; font-weight: 600; background: var(--bg); }
   .btn2:hover { border-color: var(--accent); }
+  .note .btn2 + p { margin-top: 16px; color: var(--muted); font-size: 15.5px; }
+  code { font: 15px Consolas, ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+
+  .new { display: inline-block; margin-left: 10px; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-text); font-size: 14px; font-weight: 650; letter-spacing: 0; vertical-align: middle; }
+  .card.feat b { font-size: 19px; }
+  .card.feat em { display: block; font-style: normal; color: var(--accent-text); font-size: 13.5px; font-weight: 600; margin-bottom: 6px; }
 
   footer { margin: 72px 0 40px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 22px; justify-content: space-between; }
   footer a { color: var(--muted); display: inline-block; padding: 6px 0; margin: -6px 0; }
@@ -79,15 +85,15 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M6 10l6 6 6-6M4 20h16"/></svg>
       Download for Windows
     </a>
-    <p class="small">Free · Windows 10 and 11 · 2.6 MB</p>
+    <p class="small">Free · Windows 10 and 11 · 2.9 MB · <a href="https://github.com/infinityInfinite/secbird/releases/latest">version 0.6</a></p>
     <p class="small linux">On Linux: <a href="https://github.com/infinityInfinite/secbird#linux-command-line-beta">the command line, in beta</a></p>
     <p class="oss"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
       <span>The project is fully open source. Read every line of code <a href="https://github.com/infinityInfinite/secbird">on GitHub</a>.</span></p>
   </header>
 
   <figure class="shot">
-    <img src="overview.webp" alt="The Secretarybird editor showing all connected devices" width="1280" height="800">
-    <figcaption>All devices at a glance. A real Basilisk V3 next to the simulated devices built into the app.</figcaption>
+    <img src="studio.webp" alt="RGB Studio: fire, ripples and an audio meter stacked as layers on a keyboard, with the layer settings beside it" width="1280" height="800">
+    <figcaption>RGB Studio: effects in layers, on the keys you pick, shown live. Simulated keyboard built into the app.</figcaption>
   </figure>
 
   <section>
@@ -95,8 +101,17 @@
     <div class="grid">
       <div class="card"><b>No background services</b><span>An optional cleanup command turns Razer's services off. Your devices keep working, and it can be undone.</span></div>
       <div class="card"><b>No pop-ups, no ads</b><span>No account, no tracking. It only goes online to check for a new version once a day, and you can turn that off.</span></div>
-      <div class="card"><b>Tiny</b><span>A 1 MB app that uses about 12 MB of memory while it sits in the tray.</span></div>
+      <div class="card"><b>Tiny</b><span>A 1.5 MB app that uses about 13 MB of memory while it sits in the tray.</span></div>
       <div class="card"><b>No restarts</b><span>Finds your devices in about a second. Settings come back after unplugging, sleep and reboot.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>New in 0.6 <span class="new">November 2026</span></h2>
+    <div class="grid">
+      <div class="card feat"><em>Lighting</em><b>RGB Studio</b><span>Stack effects in layers: fire, ripples on each key press, starlight, rain, an audio meter that follows your music, your screen's colors. 15 effects, on any device, even on mice whose own lighting knows only a few.</span></div>
+      <div class="card feat"><em>Mice</em><b>Scroll wheel</b><span>Tactile, free-spin or precision. Choose which modes the wheel button cycles through, and bring back the one Synapse quietly turned off. Smart-Reel and acceleration too.</span></div>
+      <div class="card feat"><em>Headsets</em><b>BlackShark V3 Pro</b><span>Equalizer you drag band by band, microphone EQ, noise cancelling, sidetone and battery. Saved in your profiles like everything else.</span></div>
     </div>
   </section>
 
@@ -104,13 +119,31 @@
     <h2>One editor for every device</h2>
     <div class="shots">
       <figure>
-        <img src="mouse.webp" alt="A mouse with three profiles side by side: lighting, DPI and button remaps, differences highlighted" width="1280" height="800" loading="lazy">
-        <figcaption><b>Profiles side by side.</b> Lighting, DPI and button remaps for every profile, editable in place. Games switch profiles automatically.</figcaption>
+        <img src="overview.webp" alt="All devices on one screen: mice, keyboards, keypads, mousepads, a laptop and a headset, grouped by kind" width="1280" height="800" loading="lazy">
+        <figcaption><b>Everything at a glance.</b> Mice, keyboards, keypads, mousepads, docks, laptops and headsets on one screen. One click puts a color on all of them.</figcaption>
       </figure>
       <figure>
-        <img src="keyboard.webp" alt="Keyboard page: painting colors onto individual keys" width="1280" height="900" loading="lazy">
-        <figcaption><b>Keyboard.</b> Paint colors key by key on per-key keyboards (simulated device shown).</figcaption>
+        <img src="buttons.webp" alt="A Naga's buttons: the main buttons and a twelve-key side grid, each with what it does" width="1280" height="800" loading="lazy">
+        <figcaption><b>Buttons and macros.</b> Remap any button, add a HyperShift layer, play macros stored on the mouse. Undo is always one click away.</figcaption>
       </figure>
+      <figure>
+        <img src="scroll.webp" alt="Scroll wheel settings: wheel mode, which modes the wheel button skips, acceleration and Smart-Reel" width="1280" height="800" loading="lazy">
+        <figcaption><b>Scroll wheel.</b> Pick the mode and which ones the wheel button skips.</figcaption>
+      </figure>
+      <figure>
+        <img src="headset.webp" alt="Headset speaker EQ: ten bands in a V shape, with slots and shapes to start from" width="1280" height="800" loading="lazy">
+        <figcaption><b>Headset.</b> Six EQ slots, shapes to start from, saved the moment you let go.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section>
+    <h2>Things Synapse won't do</h2>
+    <div class="grid">
+      <div class="card"><b>Run on Linux</b><span>The command line works on any x86_64 distribution: DPI, lighting, remaps, macros, profiles.</span></div>
+      <div class="card"><b>Compare profiles</b><span>Every profile of a device side by side, editable in place. Games switch profiles on their own.</span></div>
+      <div class="card"><b>Plain files</b><span>Your settings are one readable file. Back it up, or copy it to another PC.</span></div>
+      <div class="card"><b>Script it</b><span>Everything the editor does, the <code>secbird</code> command does too.</span></div>
     </div>
   </section>
 
@@ -126,9 +159,10 @@
 
   <section>
     <div class="note">
-      <p><strong>Help us test it.</strong> It's a beta. Ten Razer devices are confirmed working so far, mice, keyboards and a keypad among them (<a href="https://github.com/infinityInfinite/secbird#help-us-support-your-device">see the list</a>). Others should work but haven't been tried yet.</p>
+      <p><strong>Help us test it.</strong> It's a beta. Over fifteen Razer devices are confirmed working so far, from Naga, DeathAdder and Basilisk mice to BlackWidow and Huntsman keyboards, a Tartarus keypad and a BlackShark headset (<a href="https://github.com/infinityInfinite/secbird#help-us-support-your-device">see the list</a>). Others should work but haven't been tried yet.</p>
       <p>If you try it, tell us how it went, working or not. It takes two minutes and helps us a lot.</p>
       <a class="btn2" href="https://github.com/infinityInfinite/secbird/issues/new?template=device-report.yml">Report how your device works</a>
+      <p>Write code? New devices are mostly a line of data, and pull requests are welcome: start with the <a href="https://github.com/infinityInfinite/secbird/blob/main/CONTRIBUTING.md">contributor guide</a>.</p>
     </div>
   </section>
 

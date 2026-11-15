@@ -77,9 +77,14 @@ const BUTTONS_AGAIN_SECS: u64 = 60;
 /// set to stay lit get a read on the same beat (#34).
 const TIMER_LIGHTS: usize = 7;
 const LIGHTS_MS: u32 = 3_000;
+/// Layered lighting: one frame per tick while a device has a scene, else a slow look for
+/// a new scene in profiles.json.
+const TIMER_STUDIO: usize = 8;
+const STUDIO_FRAME_MS: u32 = 1000 / secbird_core::studio::FPS;
+const STUDIO_IDLE_MS: u32 = 500;
 /// Spectrum restarted on the devices together after one wakes (see `wake_sync`): armed by
 /// each wake, each profile the tray sends by itself, and each retry.
-const TIMER_SPECTRUM_WAKE: usize = 8;
+const TIMER_SPECTRUM_WAKE: usize = 9;
 
 const ID_REAPPLY: u32 = 1;
 const ID_FOLDER: u32 = 2;
@@ -147,6 +152,11 @@ struct App {
     /// and forgotten when Windows says the device went away.
     raw_devices: HashMap<isize, Option<u16>>,
     wake_sync: WakeSync,
+    /// Sound level and screen colour for the Audio and Screen effects, while used.
+    sensors: crate::sensors::Sensors,
+    /// Key presses for Reactive and Ripple, while used.
+    input: crate::input::Input,
+    studio_ms: u32,
 }
 
 /// What clicking a notification does.
@@ -332,6 +342,9 @@ pub fn run() {
                 wake_sync_on: false,
                 raw_devices: HashMap::new(),
                 wake_sync: WakeSync::default(),
+                sensors: Default::default(),
+                input: Default::default(),
+                studio_ms: STUDIO_IDLE_MS,
             })
         });
         log::append("tray started");
@@ -345,6 +358,7 @@ pub fn run() {
         SetTimer(hwnd, TIMER_BATTERY, BATTERY_MS, None);
         SetTimer(hwnd, TIMER_BUTTONS, BUTTONS_MS, None);
         SetTimer(hwnd, TIMER_LIGHTS, LIGHTS_MS, None);
+        SetTimer(hwnd, TIMER_STUDIO, STUDIO_IDLE_MS, None);
         SetTimer(hwnd, TIMER_FIRMWARE, FIRMWARE_FIRST_MS, None);
         if std::env::args().any(|a| a == "--editor") {
             with_app(|app| app.open_editor());
@@ -384,7 +398,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             0
         }
         WM_INPUT => {
-            with_app(|app| app.raw_input(lparam));
+            // One registration serves the Spectrum wake sync and the Reactive and Ripple
+            // key presses (see `Input::want`).
+            with_app(|app| {
+                app.raw_input(lparam);
+                if app.input.is_on() {
+                    if let Some((pid, names)) = app.input.read(lparam) {
+                        app.engine().studio().press(pid, names);
+                    }
+                }
+            });
             // Required for foreground raw input cleanup; harmless for INPUTSINK.
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
@@ -514,6 +537,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             if with_app(|app| app.spectrum_due()).is_none() {
                 SetTimer(hwnd, TIMER_SPECTRUM_WAKE, SETTLE_MS, None);
             }
+            0
+        }
+        WM_TIMER if wparam == TIMER_STUDIO => {
+            with_app(|app| app.studio_tick());
             0
         }
         WM_TIMER if wparam == TIMER_FOREGROUND => {
@@ -670,6 +697,26 @@ impl App {
 
     /// The lights go down while the PC is locked or its screen is off, if that's set (#48),
     /// and come back after.
+    /// One frame of layered lighting, then the sensors, the key listener and the timer's
+    /// pace set to what the scenes need now.
+    fn studio_tick(&mut self) {
+        let (busy, (keys, audio, screen), senses) = {
+            let engine = self.engine();
+            for r in engine.studio_tick().iter().filter(|r| !r.failures.is_empty()) {
+                log::append(&format!("lighting back to {} on {}: {}", r.profile, r.device, r.failures.join("; ")));
+            }
+            let studio = engine.studio();
+            (studio.busy(), studio.wants(), studio.senses.clone())
+        };
+        self.sensors.want(audio, screen, &senses);
+        self.input.want(self.hwnd, keys, self.wake_sync_on);
+        let ms = if busy { STUDIO_FRAME_MS } else { STUDIO_IDLE_MS };
+        if ms != self.studio_ms {
+            self.studio_ms = ms;
+            unsafe { SetTimer(self.hwnd, TIMER_STUDIO, ms, None) };
+        }
+    }
+
     fn set_away(&mut self, locked: bool, screen_off: bool) {
         (self.locked, self.screen_off) = (locked, screen_off);
         let percent = TraySettings::load().away_percent().filter(|_| locked || screen_off);
@@ -1378,6 +1425,7 @@ impl App {
                 }
             }
             ID_EXIT => unsafe {
+                self.engine().studio_stop();
                 DestroyWindow(self.hwnd);
             },
             id if id >= ID_PROFILE_BASE => {
