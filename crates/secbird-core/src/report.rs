@@ -158,7 +158,12 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
     for info in infos {
         let pid = info.product_id();
         let features = crate::transport::feature_reports(api, info.path());
-        let dev = crate::device::open_interface(api, info.path(), pid, info.interface_number(), &TXID_CANDIDATES, db.spec(pid));
+        // A headset only answers on its vendor collection; its other interfaces would
+        // open as Protocol 2.5 and fail.
+        let audio = !crate::headset::is_headset(pid) || (info.usage_page() == 0xFF14 && info.usage() == 1);
+        let dev = audio
+            .then(|| crate::device::open_interface(api, info.path(), pid, info.interface_number(), &TXID_CANDIDATES, db.spec(pid)))
+            .flatten();
         interfaces.push(Interface {
             pid: format!("{pid:04X}"),
             interface: info.interface_number(),
@@ -187,6 +192,39 @@ pub fn build(api: &HidApi, db: &Db) -> Report {
 
 /// Send every read-only probe to one device.
 pub fn probe(dev: &Device, simulated: bool) -> DeviceReport {
+    if crate::headset::is_headset(dev.pid) {
+        let mut probes: Vec<Probe> = [("battery", crate::headset::BATTERY), ("charging", crate::headset::CHARGING)]
+            .into_iter()
+            .map(|(name, command)| {
+                let (status, reply) = match dev.headset_query(command) {
+                    Ok(value) => ("ok".to_string(), format!("{value:02X}")),
+                    Err(e) => (e.to_string(), String::new()),
+                };
+                Probe { name, command: format!("HID64:{command:02X} GET"), status, reply }
+            })
+            .collect();
+        for &(key, label, command) in crate::headset::SETTINGS {
+            let (status, reply) = match dev.audio_read(key) {
+                Ok(values) => ("ok".to_string(), values.iter().map(i16::to_string).collect::<Vec<_>>().join(" ")),
+                Err(e) => (e.to_string(), String::new()),
+            };
+            probes.push(Probe { name: label, command: format!("HID64:{command:02X} GET"), status, reply });
+        }
+        return DeviceReport {
+            pid: format!("{:04X}", dev.pid),
+            name: dev.name(),
+            in_database: dev.spec.is_some(),
+            simulated,
+            interface: dev.interface,
+            txid: String::new(),
+            serial: String::new(),
+            probes,
+            leds: Vec::new(),
+            report_id: 0,
+            dock: Vec::new(),
+            dock_leds: Vec::new(),
+        };
+    }
     let laptop = dev.spec.as_ref().is_none_or(|s| s.kind == crate::Kind::Laptop);
     let keyboard = laptop || dev.spec.as_ref().is_some_and(|s| matches!(s.kind, crate::Kind::Keyboard | crate::Kind::Keypad));
     let run = |txid: u8, &(name, command, size, args): &(&'static str, Command, u8, &[u8])| {
@@ -272,7 +310,12 @@ impl std::fmt::Display for Report {
                 Some(id) if id != 0 => format!(", report id {id}"),
                 _ => String::new(),
             };
-            let answers = i.txid.as_ref().map(|t| format!("  <- answers Protocol 2.5 (txid {t}{id})")).unwrap_or_default();
+            let headset = crate::headset::is_headset(u16::from_str_radix(&i.pid, 16).unwrap_or(0));
+            let answers = i
+                .txid
+                .as_ref()
+                .map(|t| if headset { "  <- answers its own HID audio reports".to_string() } else { format!("  <- answers Protocol 2.5 (txid {t}{id})") })
+                .unwrap_or_default();
             // Feature reports matter for Bluetooth, whose descriptor numbers them (#10).
             let features = match i.features.as_slice() {
                 [] => String::new(),
@@ -291,8 +334,12 @@ impl std::fmt::Display for Report {
                 (false, false) => "NOT in database",
             };
             writeln!(f, "\nDevice {} {} ({known})", d.pid, d.name)?;
-            let id = if d.report_id != 0 { format!(", report id {}", d.report_id) } else { String::new() };
-            writeln!(f, "  interface {}, txid {}{id}, serial {}", d.interface, d.txid, d.serial)?;
+            if d.txid.is_empty() {
+                writeln!(f, "  interface {}, no serial (it answers its own HID audio reports)", d.interface)?;
+            } else {
+                let id = if d.report_id != 0 { format!(", report id {}", d.report_id) } else { String::new() };
+                writeln!(f, "  interface {}, txid {}{id}, serial {}", d.interface, d.txid, d.serial)?;
+            }
             for p in &d.probes {
                 writeln!(f, "  {:<26} {}  {:<12} {}", p.name, p.command, p.status, p.reply)?;
             }

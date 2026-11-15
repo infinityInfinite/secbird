@@ -7,6 +7,7 @@
 //!   a custom header also forces a CORS preflight, which we never grant).
 
 use crate::engine::Engine;
+use secbird_core::studio::{KeyPos, Scene};
 use secbird_core::{actions, config_dir, Device, Error, Kind, Rgb, Store};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -266,6 +267,9 @@ struct Body {
     action: String,
     #[serde(default)]
     name: String,
+    /// Headset settings: the setting name and its new values.
+    #[serde(default)]
+    values: Vec<i16>,
     #[serde(default)]
     keys: Vec<String>,
     /// Finding a keyboard's layout: the `[row, col]` light to show; none puts the profile back.
@@ -306,6 +310,16 @@ struct Body {
     /// Keyboards: the keys gaming mode blocks, `off` or like `win,alt-tab`.
     #[serde(default)]
     game_mode: String,
+    /// Scroll wheel: any of the mode, the skipped modes (`none` or like `free-spin`),
+    /// acceleration and Smart-Reel (`off`, `low`, `medium`, `high` or 0-4). Empty: left alone.
+    #[serde(default)]
+    scroll_mode: String,
+    #[serde(default)]
+    scroll_disabled: Option<String>,
+    #[serde(default)]
+    acceleration: String,
+    #[serde(default)]
+    smart_reel: String,
     /// Macro steps as text (`tap:ctrl+c wait:50`), and a macro id.
     #[serde(default)]
     script: String,
@@ -392,6 +406,10 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 Ok(json!({ "dpi": [x, y] }))
             }
             "/api/polling" => actions::set_polling(dev, &mut store, b.hz).map(|_| json!({})),
+            "/api/audio" => {
+                actions::set_audio(dev, &mut store, &b.name, b.values.clone())?;
+                Ok(json!({ "device": device_json(dev) }))
+            }
             "/api/stages" => {
                 let want = secbird_core::DpiStages { active: b.active, stages: b.stages.clone() };
                 let sent = actions::set_dpi_stages(dev, &mut store, &want)?;
@@ -405,6 +423,31 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
             "/api/gaming" => {
                 actions::set_game_mode(dev, &mut store, b.game_mode.parse()?)?;
                 Ok(json!({ "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()) }))
+            }
+            "/api/scroll" => {
+                // What was sent goes over the read-back: the wheel takes a moment to switch.
+                let mut sent = secbird_core::ScrollSettings::default();
+                if let Some(modes) = &b.scroll_disabled {
+                    let modes = secbird_core::scroll::parse_modes(modes)?;
+                    actions::set_scroll_disabled(dev, &mut store, modes.clone())?;
+                    sent.disabled = Some(modes);
+                }
+                if !b.scroll_mode.is_empty() {
+                    let m = b.scroll_mode.parse()?;
+                    actions::set_scroll_mode(dev, &mut store, m)?;
+                    sent.mode = Some(m);
+                }
+                if !b.acceleration.is_empty() {
+                    let a = b.acceleration.parse()?;
+                    actions::set_scroll_acceleration(dev, &mut store, a)?;
+                    sent.acceleration = Some(a);
+                }
+                if !b.smart_reel.is_empty() {
+                    let a = b.smart_reel.parse()?;
+                    actions::set_smart_reel(dev, &mut store, a)?;
+                    sent.smart_reel = Some(a);
+                }
+                Ok(json!({ "scroll": dev.scroll_wheel().ok().flatten().map(|w| sent.overlay(w)) }))
             }
             "/api/sleep" => {
                 if let Some(on) = b.auto {
@@ -424,6 +467,48 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
             "/api/keys" => {
                 let keys = b.keys.iter().map(|k| k.parse::<Rgb>()).collect::<Result<Vec<_>, _>>()?;
                 actions::set_keys(dev, &mut store, keys).map(|_| json!({}))
+            }
+            // Layered lighting: the active profile's scene (null or no layers turns it off).
+            "/api/studio" => {
+                let scene: Option<Scene> = match &b.data {
+                    Value::Null => None,
+                    v => Some(serde_json::from_value(v.clone()).map_err(|e| Error::InvalidArg(e.to_string()))?),
+                };
+                if let Some(s) = &scene {
+                    s.check()?;
+                }
+                store.for_device(dev).active_mut().studio = scene.filter(|s| !s.layers.is_empty());
+                store.save()?;
+                engine.studio().reload();
+                Ok(json!({}))
+            }
+            // Where the editor draws each key, for waves across the real board and the key
+            // pressed lighting up.
+            "/api/studio-layout" => {
+                let layout: Vec<KeyPos> = serde_json::from_value(b.data.clone()).map_err(|e| Error::InvalidArg(e.to_string()))?;
+                if layout.len() > 1024 {
+                    return Err(Error::InvalidArg("layout too long".into()));
+                }
+                let p = store.for_device(dev);
+                if p.layout != layout {
+                    p.layout = layout;
+                    store.save()?;
+                    engine.studio().reload();
+                }
+                Ok(json!({}))
+            }
+            // The live view: what the active profile's scene shows now, one colour per light
+            // (grid cells, else zones in the device's order).
+            "/api/studio-frame" => {
+                let p = store.for_device(dev);
+                let scene = p.active().studio.clone();
+                let studio = engine.studio();
+                let colors = studio.preview(dev, &p.layout, scene.as_ref());
+                Ok(json!({
+                    "colors": colors.iter().map(Rgb::to_string).collect::<Vec<_>>(),
+                    "streaming": studio.is_streaming(&dev.key()),
+                    "failing": studio.failing(&dev.key()),
+                }))
             }
             "/api/find-light" => match b.light {
                 Some((row, col)) => actions::show_light(dev, &mut store, row, col).map(|_| json!({})),
@@ -707,6 +792,9 @@ fn sleep_json(dev: &Device) -> Value {
 }
 
 fn device_json(dev: &Device) -> Value {
+    // Headset settings are read once and then served from memory; anything else here
+    // already costs a single round trip at most.
+    let (audio, audio_errors) = dev.audio_cached();
     let spec = dev.spec.as_ref();
     let (profile_names, active) = Engine::profiles(dev);
     let all = Store::load(&config_dir().join("profiles.json")).ok().map(|mut s| s.for_device(dev).clone());
@@ -768,6 +856,8 @@ fn device_json(dev: &Device) -> Value {
         "dimming": dev.dimming().ok().flatten().map(|d| d.to_string()),
         // Only keyboards that answer the read get the Gaming section.
         "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()),
+        // Only mice whose wheel answers get the Scroll wheel section.
+        "scroll": dev.scroll_wheel().ok().flatten(),
         "macros": dev.macro_storage().is_ok(),
         "matrix": spec.and_then(|s| s.matrix).map(|m| json!({ "rows": m.rows, "cols": m.cols, "first": m.first })),
         "leds": spec.map(|s| s.leds.iter().map(|l| json!({ "name": l.name, "id": l.id })).collect::<Vec<_>>()).unwrap_or_default(),
@@ -776,6 +866,8 @@ fn device_json(dev: &Device) -> Value {
         "active": active,
         "profile": profile,
         "profilesData": profiles_data,
+        "audio": audio,
+        "audio_errors": audio_errors,
     })
 }
 

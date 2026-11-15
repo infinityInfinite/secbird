@@ -251,6 +251,187 @@
   .game button { background: none; border: 0; color: var(--faint); cursor: pointer; width: 22px; height: 22px; border-radius: 50%; padding: 0; display: grid; place-items: center; }
   .game button .ico { width: 10px; height: 10px; }
   .game button:hover { color: var(--text); background: var(--line); }
+  /* Studio: the device on a dark mat, glowing with the tray's frames, on the left; layers and the
+     picked layer's settings on the right. The mat stays dark in every theme: LEDs only read
+     against black, as on a desk. */
+  :root { --stage: #08080a; --stage-key: #17171c; --stage-edge: #2a2a32; --stage-text: #ffffff78; --stage-hover: #ffffff60;
+    --stage-lamp: #24242b; --stage-lamp-edge: #ffffff14; --stage-label: #ffffffe6; --stage-hex: #ffffff8c; --stage-halo: #000; --stage-bloom: .9; }
+  /* Light themes: a light mat, white modules and dark text. The lit colors still read, and the
+     glow is softer so it tints the mat instead of smudging it. */
+  :root[data-theme="light"], :root[data-theme="workshop"] { --stage: var(--raise); --stage-key: var(--panel); --stage-edge: var(--line-strong);
+    --stage-text: var(--muted); --stage-hover: var(--text); --stage-lamp: var(--line); --stage-lamp-edge: var(--line-strong);
+    --stage-label: var(--text); --stage-hex: var(--muted); --stage-halo: var(--panel); --stage-bloom: .5; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme]) { --stage: var(--raise); --stage-key: var(--panel); --stage-edge: var(--line-strong);
+    --stage-text: var(--muted); --stage-hover: var(--text); --stage-lamp: var(--line); --stage-lamp-edge: var(--line-strong);
+    --stage-label: var(--text); --stage-hex: var(--muted); --stage-halo: var(--panel); --stage-bloom: .5; } }
+  .edbox.studiobox { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: 18px 26px; align-items: start; flex-wrap: nowrap; }
+  .st-stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; position: sticky; top: 0; }
+  .st-kb { background: var(--stage); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+  .st-kb.zones { width: fit-content; max-width: 100%; padding: 14px 18px; }
+  .st-kb:not(.zones) #studioKb { max-height: 360px; }
+  .st-kb.zones #studioKb { height: 128px; width: auto; max-width: 100%; }
+  #studioKb { width: 100%; height: auto; display: block; touch-action: none; user-select: none; -webkit-user-select: none; overflow: visible; }
+  #studioKb .bloom rect { fill: transparent; opacity: var(--stage-bloom); }
+  #studioKb g.key { cursor: crosshair; transition: opacity .18s ease-out; }
+  #studioKb .body { fill: var(--stage-key); stroke: var(--stage-edge); stroke-width: .03; }
+  #studioKb g.key:hover .body { stroke: var(--stage-hover); }
+  /* Chosen lights: an accent ring over a dark one, so it reads against any glow. */
+  #studioKb .ring, #studioKb .ring-back, #studioKb .badge { opacity: 0; pointer-events: none; transition: opacity .15s ease-out; }
+  #studioKb .ring-back { fill: none; stroke: var(--stage-halo); stroke-width: .16; }
+  #studioKb .ring { fill: none; stroke: var(--accent); stroke-width: .065; }
+  #studioKb g.key.in .ring, #studioKb g.key.in .ring-back, #studioKb g.key.in .badge { opacity: 1; }
+  #studioKb .badge circle { fill: var(--accent); stroke: var(--stage-halo); stroke-width: .05; }
+  #studioKb .badge path { fill: none; stroke: #fff; stroke-width: .045; stroke-linecap: round; stroke-linejoin: round; }
+  #studioKb.picking g.key:not(.in) { opacity: .3; }
+  #studioKb.picking .bloom { opacity: .3; }
+  #studioKb text { fill: var(--stage-text); font-size: .24px; pointer-events: none; text-anchor: middle; dominant-baseline: central; }
+  /* Zone modules: a dark body with the LED as a lit bar, so the text never sits on the color. */
+  #studioKb .lamp { fill: var(--stage-lamp); stroke: var(--stage-lamp-edge); stroke-width: .02; transition: fill .08s linear; }
+  #studioKb text.zl { fill: var(--stage-label); font-size: .19px; font-weight: 650; letter-spacing: .03px; text-transform: uppercase; }
+  #studioKb text.zh { fill: var(--stage-hex); font-size: .16px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .01px; font-variant-numeric: tabular-nums; }
+  .st-warn { color: var(--warn-text); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 8px 10px; }
+  .fxcard:disabled { opacity: .45; cursor: not-allowed; }
+  .st-status { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; color: var(--muted); }
+  .st-status i { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); flex: none; }
+  .st-status[data-state=live] { color: var(--text); }
+  .st-status[data-state=live] i { background: var(--accent); animation: stLive 2s ease-out infinite; }
+  .st-status[data-state=err] { color: var(--err-text); }
+  .st-status[data-state=err] i { background: var(--err); }
+  @keyframes stLive { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+  .st-side { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .st-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .st-head h3 { margin: 0; }
+  .st-ltools { flex-wrap: nowrap; }
+  .st-ltools .grow { flex: 1; }
+  .ghost.icon { padding: 6px 8px; }
+  .ghost .ico { width: 13px; height: 13px; }
+  .layers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .layers li { display: grid; grid-template-columns: auto 34px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; background: var(--bg); transition: border-color .15s; }
+  .layers li:hover { border-color: var(--line-strong); }
+  .layers li[aria-current=true] { border-color: var(--accent); background: var(--lit); }
+  .layers li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .layers li.off .lname, .layers li.off .fxth { opacity: .45; }
+  .layers .lname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .layers small { color: var(--muted); white-space: nowrap; }
+  .st-settings { gap: 9px; }
+  .st-field { display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 13px; min-height: 34px; }
+  .st-field.top { align-items: start; }
+  .st-field.top > span { padding-top: 3px; }
+  .st-field > span { color: var(--muted); }
+  .st-field input[type=range] { max-width: none; flex: 1; }
+  .st-field .row { flex-wrap: nowrap; }
+  .st-field .val { min-width: 36px; text-align: right; }
+  /* The effect in use, as its moving picture. */
+  .fxcurrent { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 8px 12px 8px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; text-align: left; color: var(--text); }
+  .fxcurrent:hover { border-color: var(--line-strong); }
+  .fxcurrent > span { display: flex; flex-direction: column; min-width: 0; }
+  .fxcurrent b { font-size: 14px; font-weight: 650; }
+  .fxcurrent small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fxcurrent .fxchange { color: var(--muted); font-size: 12.5px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-strong); }
+  .fxcurrent:hover .fxchange { color: var(--text); }
+  .fxcurrent .fxth { height: 30px; }
+  /* Effect gallery and scenes. */
+  .fxgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .scenegrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fxcard, .scenecard { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 7px 7px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; text-align: left; color: var(--text); transition: border-color .15s, transform .15s; }
+  .fxcard:hover, .scenecard:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+  .fxcard[aria-pressed=true] { border-color: var(--accent); background: var(--lit); }
+  .fxcard b, .scenecard b { font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+  .fxcard small, .scenecard small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .scenecard { padding: 9px; }
+  .scenecard .fxth { height: 34px; }
+  .scenecard b { font-size: 13.5px; }
+  .scenecard small { font-size: 12px; white-space: normal; }
+  /* Effect pictures: tiny loops in the layer's own colors, on the same dark mat. */
+  .fxth { position: relative; display: block; height: 24px; border-radius: 6px; background: var(--stage); border: 1px solid #00000066; overflow: hidden; }
+  .fxth.sm { height: 16px; border-radius: 4px; }
+  .fxth::before { content: ""; position: absolute; inset: 0; }
+  .th-static::before { background: var(--c1); }
+  .th-gradient::before { background: var(--grad); }
+  .th-breathing::before { background: var(--c1); animation: fxBreathe 3.2s ease-in-out infinite; }
+  .th-wave::before, .th-spectrum::before, .th-screen::before { right: auto; width: 200%; background: var(--loop); background-size: 50% 100%; animation: fxPan 2.6s linear infinite; }
+  .th-spectrum::before { width: 1000%; background-size: 10% 100%; animation-duration: 16s; }
+  .th-screen::before { background: linear-gradient(90deg, #22446e, #b07440, #3e7350, #6a3f86, #22446e); background-size: 50% 100%; animation-duration: 14s; filter: saturate(1.4); }
+  .th-wheel::before { inset: auto; left: 50%; top: 50%; width: 140px; height: 140px; margin: -70px; border-radius: 50%; background: var(--conic); animation: fxSpin 3s linear infinite; }
+  .th-reactive, .th-ripple, .th-starlight, .th-blink, .th-fire, .th-audio { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 2px; padding: 3px; align-items: end; }
+  .th-reactive::before, .th-ripple::before, .th-starlight::before, .th-blink::before, .th-fire::before, .th-audio::before, .th-rain::before, .th-battery::before { display: none; }
+  .fxth i { display: block; height: 100%; border-radius: 2px; }
+  .th-reactive i { animation: fxFlash 2.4s ease-out infinite; opacity: 0; }
+  .th-ripple i { animation: fxFlash 1.8s ease-out infinite; opacity: 0; }
+  .th-starlight i { animation: fxTwinkle 2.4s ease-in-out infinite; opacity: 0; }
+  .th-blink i { animation: fxBlink 1.1s steps(1) infinite; }
+  .th-fire i { background: linear-gradient(to top, #ff2200, #ff9a00 70%, #ffe070); transform-origin: bottom; animation: fxFlame .8s ease-in-out infinite alternate; }
+  .th-audio i { background: linear-gradient(to top, #00d040, #ffd000 70%, #ff2a00); transform-origin: bottom; animation: fxFlame .6s ease-in-out infinite alternate; }
+  .th-rain i { position: absolute; top: -40%; width: 3px; height: 40%; border-radius: 2px; animation: fxFall 1.5s linear infinite; }
+  .th-battery i { position: absolute; left: 3px; top: 3px; bottom: 3px; width: 68%; border-radius: 3px; background: #30d050; }
+  .fxth.sm { display: block; padding: 0; }
+  .fxth.sm i { display: none; }
+  .fxth.sm::before { display: block; inset: 0; width: auto; height: auto; margin: 0; border-radius: 0; background: var(--still); animation: none; transform: none; }
+  @keyframes fxBreathe { 0%, 100% { opacity: .08; } 50% { opacity: 1; } }
+  @keyframes fxPan { to { transform: translateX(-50%); } }
+  @keyframes fxSpin { to { transform: rotate(360deg); } }
+  @keyframes fxFlash { 0% { opacity: 1; } 35%, 100% { opacity: 0; } }
+  @keyframes fxTwinkle { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+  @keyframes fxBlink { 0% { opacity: 1; } 50% { opacity: .06; } }
+  @keyframes fxFlame { from { transform: scaleY(.3); } to { transform: scaleY(1); } }
+  @keyframes fxFall { to { transform: translateY(380%); } }
+  /* Colors: the strip the layer draws, its stops as handles, presets under it. */
+  .st-colors { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+  .cstrip { position: relative; padding-bottom: 12px; }
+  .cstrip:has(.cstops[hidden]) { padding-bottom: 0; }
+  .cbar { height: 20px; border-radius: 6px; border: 1px solid #00000066; }
+  .cstops { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; padding: 0 3px; pointer-events: none; }
+  .cstop { pointer-events: auto; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 2px solid var(--panel); box-shadow: 0 0 0 1px #00000088; cursor: pointer; transition: transform .12s; }
+  .cstop:hover { transform: scale(1.1); }
+  .cstop[aria-checked=true] { box-shadow: 0 0 0 2px var(--accent); transform: scale(1.12); }
+  .st-colors .swatch { width: 32px; height: 32px; }
+  .st-colors .hex { width: 88px; }
+  .st-colors .pill { white-space: nowrap; }
+  .cpresets { display: flex; flex-wrap: wrap; gap: 5px; }
+  .cpresets button { width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid #00000066; cursor: pointer; transition: transform .12s; }
+  .cpresets button:hover { transform: translateY(-1px); }
+  .cpresets button[aria-pressed=true] { outline: 2px solid var(--text); outline-offset: 1px; }
+  /* Direction dial. */
+  .dialrow { gap: 12px; }
+  .dial { width: 64px; height: 64px; flex: none; cursor: grab; touch-action: none; }
+  .dial:active { cursor: grabbing; }
+  .dial:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 50%; }
+  .dring { fill: var(--bg); stroke: var(--line-strong); stroke-width: 1.5; }
+  .dticks line { stroke: var(--faint); stroke-width: 1.5; stroke-linecap: round; }
+  .dneedle { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+  .dhub { fill: var(--line-strong); }
+  .dknob { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+  .dialtext { display: flex; flex-direction: column; min-width: 0; }
+  .dialtext .val { text-align: left; font-size: 15px; font-weight: 650; }
+  @media (prefers-reduced-motion: reduce) { .fxth *, .fxth::before, .st-status i { animation: none !important; opacity: 1; } .fxcard:hover, .scenecard:hover { transform: none; } }
+  @media (max-width: 1000px) { .edbox.studiobox { grid-template-columns: minmax(0, 1fr); } .st-stage { position: static; } }
+  /* RGB Studio page: a tab of its own, scrolling inside itself like All devices. */
+  .spage { flex: 1; min-height: 0; overflow: auto; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .sp-head { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; }
+  .sp-head h2 { margin: 0; font-size: 20px; font-weight: 650; }
+  .sp-devs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sp-devs .pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; }
+  .sp-dot { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+  .sp-dot.on { background: var(--value); border-color: var(--value); }
+  .sp-saved { margin: 0 0 0 auto; color: var(--muted); font-size: 12.5px; }
+  .sp-saved b { color: var(--text); font-weight: 600; }
+  .sp-tipsback { font-size: 12.5px; }
+  .sp-guide { display: flex; align-items: center; gap: 16px; padding: 12px 14px 12px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .sp-steps { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; flex: 1; }
+  .sp-steps li { counter-increment: step; align-content: start; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 2px 8px; font-size: 12.5px; color: var(--muted); }
+  .sp-steps li::before { content: counter(step); grid-row: span 2; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; color: var(--value); font-weight: 650; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .sp-steps b { color: var(--text); font-size: 13px; font-weight: 600; }
+  .sp-cost { margin: 0; padding: 8px 14px; border: 1px solid var(--warn-line); background: var(--warn-bg); color: var(--warn-text); border-radius: 10px; font-size: 12.5px; line-height: 1.5; }
+  .sp-cost summary { cursor: pointer; list-style: none; }
+  .sp-cost summary::-webkit-details-marker { display: none; }
+  .sp-cost .sp-more { text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
+  .sp-cost[open] .sp-more { display: none; }
+  .sp-cost p { margin: 6px 0 0; max-width: 110ch; }
+  .sp-none { max-width: 60ch; }
+  .spage .edbox.studiobox { grid-template-columns: minmax(0, 1fr) minmax(330px, 400px); }
+  .spage .st-kb.zones #studioKb { height: 170px; }
+  @media (max-width: 1100px) { .sp-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 820px) { .spage { padding: 12px 14px 20px; } .sp-guide { flex-direction: column; align-items: stretch; } .sp-steps { grid-template-columns: minmax(0, 1fr); gap: 10px; } .sp-saved { margin-left: 0; } }
   .kbwrap { overflow-x: auto; flex-basis: 100%; min-width: 0; max-width: 100%; }
   #kb { width: 100%; min-width: 600px; max-width: 1040px; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; flex-basis: 100%; }
   #kb rect { fill: var(--key-fill); stroke: var(--key-stroke); stroke-width: .03; transition: fill .12s; cursor: crosshair; }
@@ -422,6 +603,46 @@
   .sec[aria-current=true] b, .sec[aria-current=true] span { color: var(--on-accent); }
   .seg button[aria-pressed=true] { background: var(--fill); color: var(--on-accent); box-shadow: none; }
   .tab[aria-selected=true] { border-color: var(--accent); }
+  /* Headset audio: one tile per setting, each opening its own panel. */
+  .audio-stack { gap: 18px; }
+  /* Equalizer: ten faders over a dB grid, the curve drawn through the knobs. */
+  .eq { display: grid; gap: 10px; }
+  .eq-chart { display: grid; grid-template-columns: 26px minmax(0, 1fr); grid-template-rows: 190px auto; column-gap: 4px;
+    padding: 26px 8px 8px 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+  .eq-axis { position: relative; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .eq-axis span { position: absolute; right: 2px; transform: translateY(-50%); }
+  .eq-plot { position: relative; }
+  .eq-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .eq-plot line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .eq-plot line.zero { stroke: var(--line-strong); stroke-width: 1.5; }
+  .eq-plot .curve { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+  .eq-plot .area { fill: var(--accent); opacity: .12; }
+  .eq-bands { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); }
+  .eq-band { position: relative; cursor: ns-resize; touch-action: none; outline: none; border-radius: 6px; }
+  .eq-band:hover, .eq-band.drag { background: color-mix(in srgb, var(--text) 5%, transparent); }
+  .eq-band:focus-visible { box-shadow: inset 0 0 0 2px var(--focus, var(--accent)); }
+  .eq-track { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--line); border-radius: 2px; }
+  .eq-knob { position: absolute; left: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--accent); transition: transform .1s ease-out; }
+  .eq-band:hover .eq-knob, .eq-band.drag .eq-knob, .eq-band:focus-visible .eq-knob { transform: scale(1.25); }
+  .eq-band.off .eq-knob { background: var(--bg); }
+  .eq-val { position: absolute; left: 50%; transform: translate(-50%, -24px); font-size: 10.5px; font-weight: 650; color: var(--value);
+    background: var(--bg); padding: 0 3px; border-radius: 4px; pointer-events: none; white-space: nowrap; }
+  .eq-band.off:not(:hover):not(.drag):not(:focus-visible) .eq-val { color: var(--muted); font-weight: 500; }
+  .eq-freqs { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); text-align: center; font-size: 10.5px; color: var(--muted); padding-top: 6px; font-variant-numeric: tabular-nums; }
+  .eq-shapes { gap: 6px; flex-wrap: wrap; }
+  .eq-shapes .pill { padding: 4px 10px; font-size: 12px; }
+  .audio-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .audio-tiles .tile { min-height: 46px; padding: 8px 10px; }
+  .audio-tiles .tile .tv { font-size: 11px; }
+  .audio-readonly { display: flex; align-items: center; gap: 8px; color: var(--text); padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--raise); }
+  .audio-error { color: var(--muted); border-left: 2px solid var(--line-strong); padding-left: 9px; overflow-wrap: anywhere; }
+  .audio-error b { color: var(--text); }
+  .audio-control { width: 100%; }
+  .audio-control input[type=range] { flex: 1; }
+  .eqmini { width: 46px; height: 13px; vertical-align: -2px; margin-right: 7px; overflow: visible; }
+  .eqmini line { stroke: currentColor; opacity: .3; stroke-width: .8; }
+  .eqmini polyline { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 </style>
 </head>
 <body>
@@ -479,6 +700,7 @@
   </div>
 
   <section class="settings" id="settings" hidden aria-label="Settings"></section>
+  <section class="spage" id="studioPage" hidden aria-label="RGB Studio"></section>
 
   <section class="compare" id="compare" hidden>
     <div class="sheet-wrap" id="sheetWrap">
@@ -500,7 +722,7 @@ const PRESETS = [['FF0000','Red'],['FF2800','Orange'],['FF9600','Yellow'],['00FF
 const NAMES = { scroll: 'Scroll wheel', logo: 'Logo', underglow: 'Underglow', backlight: 'Backlight', side: 'Side plate', profile: 'Profile light', dock: 'Dock' };
 const KINDS = { mouse: 'Mouse', keyboard: 'Keyboard', laptop: 'Laptop', keypad: 'Keypad', mousepad: 'Mousepad',
   headset: 'Headset', accessory: 'Accessory', unknown: 'Device' };
-let devices = [], unsupported = [], synapse = [], dev = null, showAll = null;
+let devices = [], unsupported = [], synapse = [], dev = null, showAll = null, showStudio = false;
 let sel = null, section = null, view = 'work'; // selected tile, rail section, 'work' or 'compare'
 let btnFailed = {}, btnData = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
 
@@ -644,7 +866,10 @@ function live(send, done) {
   };
 }
 
-const ICONS = { plus: '<path d="M8 3v10M3 8h10"/>', minus: '<path d="M3 8h10"/>', x: '<path d="M4 4l8 8M12 4l-8 8"/>',
+const ICONS = { up: '<path d="M3.5 10l4.5-4.5 4.5 4.5"/>', down: '<path d="M3.5 6l4.5 4.5 4.5-4.5"/>',
+  copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a.5.5 0 0 0-.5-.5H3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h.5"/>',
+  trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>', minus: '<path d="M3 8h10"/>', x: '<path d="M4 4l8 8M12 4l-8 8"/>',
   left: '<path d="M10 3L5 8l5 5"/>', right: '<path d="M6 3l5 5-5 5"/>',
   gear: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/><circle cx="8" cy="8" r="4.6"/>' };
 
@@ -760,8 +985,9 @@ function render() {
   $('empty').hidden = has || unsupported.length > 0 || showSettings;
   $('overview').hidden = !showAll || showSettings;
   $('settings').hidden = !showSettings;
+  $('studioPage').hidden = !showStudio || showSettings;
   $('gear').ariaPressed = showSettings;
-  const onDevice = has && !showAll && !showSettings;
+  const onDevice = has && !showAll && !showSettings && !showStudio;
   $('devbar').hidden = !onDevice;
   $('work').hidden = !onDevice || view === 'compare';
   $('compare').hidden = !onDevice || view !== 'compare';
@@ -774,19 +1000,21 @@ function render() {
   $('tabs').innerHTML = '';
   const tab = (text, selected, onclick) => $('tabs').append(el('button', { className: 'tab', textContent: text, onclick, ariaSelected: selected }));
   if (devices.length || unsupported.length) {
-    tab('All devices', !!showAll && !showSettings, () => { showAll = true; showSettings = false; sel = null; render(); });
-    devices.forEach(d => tab(devLabel(d), !showAll && !showSettings && d.id === dev.id, () => openDevice(d)));
+    tab('All devices', !!showAll && !showSettings, () => { showAll = true; showStudio = false; showSettings = false; sel = null; render(); });
+    if (studioDevices().length) tab('RGB Studio', showStudio && !showSettings, () => openStudio());
+    devices.forEach(d => tab(devLabel(d), !showAll && !showSettings && !showStudio && d.id === dev.id, () => openDevice(d)));
   }
   requestAnimationFrame(() => { bringIntoView($('tabs'), $('tabs').querySelector('[aria-selected=true]')); updateTabsRow(); });
   if (showSettings) return renderSettings();
   if (showAll) return renderOverview();
+  if (showStudio) return renderStudioPage();
   if (!has) return;
   renderDevbar();
   if (view === 'compare') renderCompare(); else renderWork();
 }
 
 function openDevice(d) {
-  dev = d; sel = null; showAll = false; showSettings = false;
+  dev = d; sel = null; showAll = false; showSettings = false; showStudio = false;
   section = null; // resolved (last used, else first) when the workbench draws
   render();
 }
@@ -857,7 +1085,7 @@ function sections() {
   const light = dev.leds.map(l => ({ key: 'zone:' + l.name, label: label(l.name) }));
   if (dev.matrix) light.push({ key: 'keys', label: 'Per-key colors' });
   if (light.length) s.push({ id: 'light', name: 'Lighting',
-    rows: [{ key: 'lighting-control', label: 'Control lighting' }, ...(dev.lighting_control ? light : [])],
+    rows: [{ key: 'lighting-control', label: 'Control lighting' }, ...(dev.lighting_control ? [{ key: 'studio', label: 'RGB Studio' }, ...light] : [])],
     tools: dev.lighting_control && dev.leds.length > 1 ? 'allzones' : null });
   const sens = [];
   if (dev.dpi) sens.push({ key: 'dpi', label: 'DPI' });
@@ -871,12 +1099,23 @@ function sections() {
         .map(b => ({ key: 'btn:' + b.name, label: (buttonPlace(b.name) || [b.label])[0], name: b.name })),
         ...(list && list.length && !isBoard() ? [{ key: 'onboard', label: 'Saved on the mouse' }] : [])] });
   }
+  if (dev.scroll) s.push({ id: 'scroll', name: 'Scroll wheel', rows: [{ key: 'scroll', label: 'Scroll wheel' }] });
   if (dev.macros) s.push({ id: 'macros', name: 'Macros', rows: [{ key: 'macros', label: 'Macros on the device' }] });
   if (dev.game_mode != null) s.push({ id: 'gaming', name: 'Gaming', rows: [{ key: 'gaming', label: 'Gaming mode' }] });
   const power = [];
   if (dev.sleep) power.push({ key: 'sleep', label: 'Sleep when idle' });
   if (dev.dimming) power.push({ key: 'dimming', label: 'Keyboard when idle' });
   if (power.length) s.push({ id: 'power', name: 'Power', rows: power });
+  if (dev.kind === 'headset' && dev.audio) {
+    const has = (...names) => names.some(n => (dev.audio && dev.audio[n]) || (dev.audio_errors && dev.audio_errors[n]));
+    s.push({ id: 'audio', name: 'Audio', rows: [
+      has('eq-0', 'eq-preset') && { key: 'audio:eq', label: 'Speaker EQ' },
+      has('mic-eq', 'mic-preset', 'mic-mute') && { key: 'audio:mic', label: 'Microphone' },
+      has('anc') && { key: 'audio:anc', label: 'Noise cancelling' },
+      has('sidetone') && { key: 'audio:sidetone', label: 'Sidetone' },
+      has('auto-off') && { key: 'audio:auto-off', label: 'Auto power-off' },
+    ].filter(Boolean) });
+  }
   s.push({ id: 'profile', name: 'Profile', rows: [{ key: 'apps', label: 'Switches with' }] });
   s.push({ id: 'device', name: 'Device', rows: [{ key: 'device', label: 'About this device' }] });
   return s;
@@ -889,6 +1128,7 @@ function railSummary(s) {
   const p = dev.profile;
   if (s.id === 'light') {
     if (!dev.lighting_control) return 'Not controlled';
+    if (studioOn(p)) return 'Studio: ' + studioSummary(p);
     if (p.keys && p.keys.length && dev.matrix) return 'Per-key colors';
     const box = el('span');
     dev.leds.forEach(l => { const paint = zonePaint(zoneOf(p, l.name)); const d = el('i', { className: 'dot' + (paint ? '' : ' off') });
@@ -904,12 +1144,14 @@ function railSummary(s) {
     return n ? plural(n, isBoard() ? 'key' : 'button') + ' changed' : 'As saved in the ' + holder();
   }
   if (s.id === 'gaming') return gamingText(dev.game_mode);
+  if (s.id === 'scroll') return scrollText(dev.scroll);
   if (s.id === 'macros') { const m = macroData[dev.id]; return m ? (m.macros.length ? plural(m.macros.length, 'macro') : 'None yet') : 'On the device'; }
   if (s.id === 'power') {
     const sl = dev.sleep;
     if (!sl) return 'When idle: ' + DIMMING[dev.dimming].toLowerCase();
     return sl.auto === false ? 'Never sleeps' : 'Sleeps after ' + sl.minutes + ' min';
   }
+  if (s.id === 'audio') return 'EQ, mic, noise cancelling';
   if (s.id === 'profile') { const a = p.apps || []; return a.length ? a.join(', ') : 'No games yet'; }
   if (s.id === 'device') return dev.firmware ? 'Firmware ' + dev.firmware : (KINDS[dev.kind] || 'Device');
   return '';
@@ -954,7 +1196,7 @@ function renderWork(keepPanel) {
   if (sel && sectionOf(sel) !== section) sel = null;
   renderRail(secs);
   renderTiles(cur);
-  $('work').classList.toggle('wide', sel === 'keys');
+  $('work').classList.toggle('wide', sel === 'keys' || sel === 'studio');
   $('work').classList.toggle('has-sel', !!sel);
   if (!keepPanel || !$('panel').childElementCount) renderPanel(cur);
 }
@@ -983,6 +1225,10 @@ function renderTiles(cur) {
   }
   head.append(tools);
   t.append(head);
+  if (cur.id === 'audio') {
+    t.append(el('div', { className: 'tgrid' }, ...cur.rows.map(r => tile(r))));
+    return;
+  }
   if (cur.loading) {
     const g = el('div', { className: 'tgrid' });
     for (let i = 0; i < 8; i++) g.append(el('div', { className: 'skel' }));
@@ -1133,6 +1379,7 @@ function tile(r, short) {
 }
 
 function select(key) {
+  if (key === 'studio') return openStudio(); // a page of its own
   sel = sel === key ? null : key;
   renderWork();
   if (sel && matchMedia('(max-width: 820px)').matches) { // keep the tile in sight above the sheet
@@ -1161,7 +1408,7 @@ function renderPanel(cur) {
     el('button', { className: 'xbtn', innerHTML: icon('x'), title: 'Close (Esc)', ariaLabel: 'Close', onclick: closePanel })));
   const body = el('div', { className: 'pbody' });
   p.append(body);
-  buildEditor(body, r);
+  if (r.key.startsWith('audio:')) audioEditor(body, r.key.slice(6)); else buildEditor(body, r);
 }
 
 function closePanel() {
@@ -1208,7 +1455,7 @@ function focusCell(row) {
 }
 // Data changed: redraw what shows it, leaving an open editor alone.
 function renderSheet() {
-  if (!dev || showAll) return;
+  if (!dev || showAll || showStudio) return;
   if (view === 'compare') renderCompare(); else renderWork(true);
 }
 // One value changed: update its tile, the rail line, and its Compare cell.
@@ -1275,6 +1522,7 @@ function cellValue(key, name) {
   if (key === 'sleep') { const sl = sleepOf(name); return sl ? sl.auto + ':' + sl.minutes : ''; }
   if (key === 'dimming') return dimmingOf(name) || '';
   if (key === 'gaming') return gamingOf(name) || '';
+  if (key === 'scroll') return JSON.stringify(scrollOf(name) || '');
   if (key === 'macros' || key === 'onboard') return 'shared'; // the device's, the same in every profile
   if (key.startsWith('btn:')) {
     const b = (btnData[dev.id] || []).find(x => x.name === key.slice(4)); if (!b) return '';
@@ -1305,6 +1553,7 @@ function cellView(key, name) {
     return [`<span class="sw" style="background:#${esc(z.color)}"></span><span class="num">#${esc(z.color)}</span>` +
       (z.brightness != null && z.brightness !== 100 ? ` <small class="num">${z.brightness}%</small>` : '')];
   }
+  if (key === 'studio') return studioOn(p) ? [esc(studioSummary(p))] : ['<span class="unset">' + esc(studioSummary(p)) + '</span>'];
   if (key === 'keys') {
     if (!p.keys || !p.keys.length) return ['<span class="unset">Whole keyboard</span>'];
     const colors = [...new Set(p.keys.filter(k => k !== '000000'))];
@@ -1329,6 +1578,10 @@ function cellView(key, name) {
     const d = dimmingOf(name);
     return [d ? DIMMING[d] : '<span class="unset">Not set</span>'];
   }
+  if (key === 'scroll') {
+    const w = scrollOf(name);
+    return [w ? scrollText(w) : '<span class="unset">Not set</span>'];
+  }
   if (key === 'gaming') {
     const g = gamingOf(name);
     return [g ? gamingText(g) : '<span class="unset">Not set</span>'];
@@ -1344,6 +1597,7 @@ function cellView(key, name) {
     return [m.macros.length ? `${plural(m.macros.length, 'macro')} <small>· every profile</small>` : '<span class="unset">None yet</span>'];
   }
   if (key === 'loading') return ['<span class="unset">…</span>'];
+  if (key.startsWith('audio:')) return [audioSummary(key.slice(6), active ? dev.audio || {} : p.audio || {})];
   if (key === 'apps') { const a = p.apps || []; return [a.length ? esc(a.join(', ')) : '<span class="unset">No games yet</span>']; }
   if (key === 'device') return [esc(dev.firmware ? 'Firmware ' + dev.firmware : KINDS[dev.kind] || 'Device')];
   if (key.startsWith('btn:')) {
@@ -1402,18 +1656,205 @@ function buildEditor(host, r) {
   if (r.key === 'lighting-control') lightingControlEditor(box);
   else if (r.key.startsWith('zone:')) zoneEditor(box, r.key.slice(5));
   else if (r.key === 'keys') keysEditor(box);
+  else if (r.key === 'studio') studioEditor(box);
   else if (r.key === 'dpi') dpiEditor(box);
   else if (r.key === 'polling') pollingEditor(box);
   else if (r.key === 'stages') stagesEditor(box);
   else if (r.key === 'sleep') sleepEditor(box);
   else if (r.key === 'dimming') dimmingEditor(box);
   else if (r.key === 'gaming') gamingEditor(box);
+  else if (r.key === 'scroll') scrollEditor(box);
   else if (r.key === 'onboard') onboardEditor(box);
   else if (r.key === 'macros') macrosEditor(box);
   else if (r.key === 'apps') appsEditor(box);
   else if (r.key === 'device') deviceEditor(box);
   else if (r.key.startsWith('btn:')) buttonEditor(box, r.key.slice(4));
 }
+
+const AUDIO_BANDS = ['31', '63', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+const MIC_PRESETS = [[32, 'Default'], [33, 'Flat'], [34, 'Broadcast'], [35, 'Esports']];
+const AUDIO_SLOTS = ['Default', 'Game', 'Music', 'Movie', 'Esports 1', 'Esports 2'];
+const AUDIO_LABELS = { anc: 'Noise cancelling', 'eq-preset': 'Active EQ slot', 'mic-preset': 'Microphone preset',
+  'mic-eq': 'Microphone EQ', sidetone: 'Sidetone', 'auto-off': 'Automatic power-off', 'mic-mute': 'Microphone mute' };
+const audioLabel = name => name !== 'eq-preset' && name.startsWith('eq-') ? 'Speaker EQ' : (AUDIO_LABELS[name] || name);
+const audioValue = name => dev.audio && dev.audio[name];
+const audioError = name => dev.audio_errors && dev.audio_errors[name];
+// What each headset tile says: the headset's own answer for the live profile, the saved
+// settings for the others.
+function eqCurve(bands) {
+  const pts = bands.slice(0, 10).map((v, i) => `${i * 6.6 + 1},${8 - v / 12 * 6.5}`).join(' ');
+  return `<svg class="eqmini" viewBox="0 0 61.4 16" aria-hidden="true"><line x1="0" x2="61.4" y1="8" y2="8"/><polyline points="${pts}"/></svg>`;
+}
+function audioSummary(part, a) {
+  const unset = t => `<span class="unset">${t}</span>`;
+  if (part === 'eq') {
+    const slot = a['eq-preset'] ? a['eq-preset'][0] : null, bands = slot != null && a['eq-' + slot];
+    if (slot == null) return unset('Not read');
+    const flat = bands && bands.every(v => !v);
+    return (bands ? eqCurve(bands) : '') + esc(AUDIO_SLOTS[slot]) + (flat ? ' · flat' : '');
+  }
+  if (part === 'mic') {
+    const preset = a['mic-preset'] && MIC_PRESETS.find(([v]) => v === a['mic-preset'][0]);
+    const muted = a['mic-mute'] && a['mic-mute'][0];
+    return (preset ? esc(preset[1]) : unset('Custom')) + (muted ? ' · ' + unset('muted') : '');
+  }
+  if (part === 'anc') {
+    if (!a.anc) return unset('Not read');
+    const [mode, level] = a.anc;
+    return mode === 0 ? '<span class="sw off"></span>Off' : (mode === 80 ? 'Ambient' : 'On') + ` · level <span class="num">${level}</span>`;
+  }
+  if (part === 'sidetone') return a.sidetone ? (a.sidetone[0] ? `<span class="num">${a.sidetone[0]}</span>%` : '<span class="sw off"></span>Off') : unset('Not read');
+  if (part === 'auto-off') return a['auto-off'] ? (a['auto-off'][0] ? `After <span class="num">${a['auto-off'][0]}</span> min` : 'Never') : unset('Not read');
+  return '';
+}
+
+function audioEditor(host, part) {
+  const audio = dev.audio || {}, errors = dev.audio_errors || {};
+  const box = el('div', { className: 'edbox audio-stack' });
+  const group = (title, ...kids) => el('div', { className: 'edgroup' }, title ? el('h3', { textContent: title }) : null, ...kids);
+  const failed = name => errors[name] ? el('p', { className: 'audio-error' }, el('b', { textContent: audioLabel(name) + ': ' }), errors[name]) : null;
+  // Every change goes to the headset at once and is read back; the tile shows what it kept.
+  const save = async (name, values) => {
+    try {
+      const r = await api('/api/audio', { name, values });
+      Object.assign(dev, r.device);
+      renderWork();
+      toast(audioLabel(name) + ' saved on the headset · profile ' + dev.active);
+    } catch (e) { toast(e.message, true); renderWork(); }
+  };
+  const choices = (label, list, current, pick) => {
+    const g = el('div', { className: 'audio-tiles', role: 'group', ariaLabel: label });
+    list.forEach(([v, text, sub]) => g.append(el('button', { className: 'tile', ariaPressed: v === current,
+      onclick: () => { if (v !== current) pick(v); } }, el('span', { className: 'tl', textContent: text }), sub ? el('span', { className: 'tv', textContent: sub }) : null)));
+    return g;
+  };
+  const slider = (label, min, max, value, unit, done) => {
+    const out = el('span', { className: 'val num' });
+    const show = v => out.textContent = unit(+v);
+    const r = el('input', { type: 'range', min, max, step: 1, value, ariaLabel: label });
+    r.oninput = () => show(r.value); r.onchange = () => done(+r.value); show(value);
+    return el('div', { className: 'row audio-control' }, r, out);
+  };
+  // A 10-band equalizer like a mixing desk: each band is a fader (drag anywhere in its column,
+  // arrow keys when focused, double-click for 0 dB), with the curve drawn through the knobs.
+  // Sent to the headset when you let go.
+  const chart = (name, current, microphone) => {
+    if (!current) return failed(name) || el('p', { className: 'audio-error', textContent: 'This setting is not available.' });
+    const vals = current.slice(0, 10).map(v => Math.max(-12, Math.min(12, v)));
+    const sent = vals.join();
+    const top = v => (12 - v) / 24 * 100; // % from the top of the plot
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 1000 100'); svg.setAttribute('preserveAspectRatio', 'none'); svg.setAttribute('aria-hidden', 'true');
+    [-12, -6, 0, 6, 12].forEach(v => {
+      const l = document.createElementNS(NS, 'line');
+      l.setAttribute('x1', 0); l.setAttribute('x2', 1000); l.setAttribute('y1', top(v)); l.setAttribute('y2', top(v));
+      if (v === 0) l.setAttribute('class', 'zero');
+      svg.append(l);
+    });
+    const area = document.createElementNS(NS, 'path'); area.setAttribute('class', 'area');
+    const curve = document.createElementNS(NS, 'path'); curve.setAttribute('class', 'curve');
+    svg.append(area, curve);
+    const axis = el('div', { className: 'eq-axis', ariaHidden: 'true' });
+    [12, 6, 0, -6, -12].forEach(v => { const s = el('span', { textContent: (v > 0 ? '+' : '') + v }); s.style.top = top(v) + '%'; axis.append(s); });
+    const bands = el('div', { className: 'eq-bands' });
+    const freqs = el('div', { className: 'eq-freqs', ariaHidden: 'true' });
+    const label = (microphone ? 'Microphone' : 'Speaker') + ' EQ ';
+    const knobs = vals.map((v, i) => {
+      const knob = el('i', { className: 'eq-knob' }), out = el('b', { className: 'eq-val num' });
+      const band = el('div', { className: 'eq-band', tabIndex: 0, role: 'slider', ariaLabel: label + AUDIO_BANDS[i] + ' Hz',
+        ariaValueMin: -12, ariaValueMax: 12, ariaOrientation: 'vertical' }, el('span', { className: 'eq-track' }), knob, out);
+      const fromY = e => { const r = band.getBoundingClientRect(); return Math.round(12 - (e.clientY - r.top) / r.height * 24); };
+      band.onpointerdown = e => { e.preventDefault(); band.focus(); band.setPointerCapture(e.pointerId); band.classList.add('drag'); set(i, fromY(e)); };
+      band.onpointermove = e => { if (band.hasPointerCapture(e.pointerId)) set(i, fromY(e)); };
+      band.onpointerup = band.onpointercancel = e => { band.classList.remove('drag'); if (band.hasPointerCapture(e.pointerId)) band.releasePointerCapture(e.pointerId); commit(); };
+      band.ondblclick = () => { set(i, 0); commit(); };
+      band.onkeydown = e => {
+        const step = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 3, PageDown: -3 }[e.key];
+        const to = step != null ? vals[i] + step : e.key === 'Home' ? 12 : e.key === 'End' ? -12 : e.key === '0' || e.key === 'Delete' ? 0 : null;
+        if (to == null) return;
+        e.preventDefault(); set(i, to); clearTimeout(keyTimer); keyTimer = setTimeout(commit, 500);
+      };
+      bands.append(band); freqs.append(el('span', { textContent: AUDIO_BANDS[i] }));
+      return { band, knob, out };
+    });
+    let keyTimer;
+    function set(i, v) { vals[i] = Math.max(-12, Math.min(12, v)); draw(); }
+    function commit() { if (vals.join() !== sent) save(name, [...vals]); }
+    function draw() {
+      const pts = vals.map((v, i) => [50 + i * 100, top(v)]);
+      // A smooth line through every knob (Catmull-Rom as cubic Béziers).
+      let d = `M${pts[0][0]},${pts[0][1]}`;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [p0, p1, p2, p3] = [pts[Math.max(0, i - 1)], pts[i], pts[i + 1], pts[Math.min(pts.length - 1, i + 2)]];
+        d += ` C${p1[0] + (p2[0] - p0[0]) / 6},${p1[1] + (p2[1] - p0[1]) / 6} ${p2[0] - (p3[0] - p1[0]) / 6},${p2[1] - (p3[1] - p1[1]) / 6} ${p2[0]},${p2[1]}`;
+      }
+      curve.setAttribute('d', `M0,${pts[0][1]} L` + d.slice(1) + ` L1000,${pts[9][1]}`);
+      area.setAttribute('d', `M0,50 L0,${pts[0][1]} L` + d.slice(1) + ` L1000,${pts[9][1]} L1000,50 Z`);
+      knobs.forEach(({ band, knob, out }, i) => {
+        const v = vals[i];
+        knob.style.top = out.style.top = top(v) + '%';
+        out.textContent = (v > 0 ? '+' : '') + v;
+        band.ariaValueNow = v; band.ariaValueText = (v > 0 ? '+' : '') + v + ' dB';
+        band.classList.toggle('off', v === 0);
+      });
+    }
+    draw();
+    // Shapes to start from; speakers only (the microphone has its own presets above).
+    const SHAPES = [['Flat', [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], ['Bass boost', [6, 5, 4, 2, 0, 0, 0, 0, 0, 0]],
+      ['Vocal', [-2, -1, 0, 1, 3, 4, 3, 1, 0, -1]], ['Treble', [0, 0, 0, 0, 0, 1, 2, 4, 5, 6]], ['V-shape', [5, 4, 2, 0, -2, -2, 0, 2, 4, 5]],
+      ['Footsteps', [-4, -3, -2, 0, 1, 3, 5, 5, 3, 0]]];
+    const shapes = el('div', { className: 'row eq-shapes', role: 'group', ariaLabel: 'Start from a shape' });
+    if (microphone) { if (vals.some(v => v)) shapes.append(el('button', { className: 'link', textContent: 'Reset to flat', onclick: () => save(name, vals.map(() => 0)) })); }
+    else SHAPES.forEach(([t, v]) => shapes.append(el('button', { className: 'pill', textContent: t,
+      ariaPressed: v.join() === sent, onclick: () => { if (v.join() !== sent) save(name, v); } })));
+    return el('div', { className: 'eq' },
+      el('div', { className: 'eq-chart' }, axis, el('div', { className: 'eq-plot' }, svg, bands), el('span'), freqs),
+      shapes,
+      el('p', { className: 'note', textContent: 'Drag a band up or down, or focus it and use the arrow keys. Double-click puts it back at 0 dB. Saved when you let go.' }));
+  };
+
+  if (part === 'eq') {
+    const playing = audio['eq-preset'] ? audio['eq-preset'][0] : null;
+    const editing = Math.min(5, Math.max(0, audioEditSlot ?? playing ?? 0));
+    box.append(group('Slot',
+      choices('Speaker EQ slot to edit', AUDIO_SLOTS.map((t, i) => [i, t, i === playing ? 'Playing' : '']), editing,
+        i => { audioEditSlot = i; renderWork(); }),
+      failed('eq-preset'),
+      playing != null && editing !== playing
+        ? el('div', { className: 'row' }, el('button', { className: 'ghost', textContent: 'Play ' + AUDIO_SLOTS[editing] + ' on the headset', onclick: () => save('eq-preset', [editing]) }),
+          el('span', { className: 'note', textContent: 'Now playing: ' + AUDIO_SLOTS[playing] }))
+        : el('p', { className: 'note', textContent: 'The headset plays this slot.' })));
+    box.append(group(AUDIO_SLOTS[editing] + ' equalizer', chart('eq-' + editing, audioValue('eq-' + editing), false)));
+  } else if (part === 'mic') {
+    if (audio['mic-preset']) box.append(group('Preset', choices('Microphone EQ preset', MIC_PRESETS.map(([v, t]) => [v, t]), audio['mic-preset'][0], v => save('mic-preset', [v]))));
+    else if (failed('mic-preset')) box.append(failed('mic-preset'));
+    box.append(group('Microphone equalizer', chart('mic-eq', audioValue('mic-eq'), true)));
+    if (audio['mic-mute']) box.append(group('Mute', el('div', { className: 'audio-readonly', role: 'status' },
+      el('span', { className: 'sw' + (audio['mic-mute'][0] ? ' off' : '') }), audio['mic-mute'][0] ? 'Muted' : 'Not muted'),
+      el('p', { className: 'note', textContent: 'Set by the switch on the headset; software can’t change it.' })));
+  } else if (part === 'anc') {
+    if (!audio.anc) box.append(failed('anc'));
+    else {
+      const [mode, level] = audio.anc;
+      box.append(group('Mode', choices('Noise cancelling mode', [[0, 'Off'], [1, 'Noise cancelling', 'Blocks the room'], [80, 'Ambient', 'Lets voices in']], mode,
+        v => save('anc', [v, level || 5]))));
+      if (mode !== 0) box.append(group(mode === 80 ? 'How much of the room comes in' : 'Strength',
+        slider('Level', 1, 10, level, v => v + ' of 10', v => save('anc', [mode, v]))));
+    }
+  } else if (part === 'sidetone') {
+    if (!audio.sidetone) box.append(failed('sidetone'));
+    else box.append(group('Level', slider('Sidetone level', 0, 100, audio.sidetone[0], v => v ? v + '%' : 'Off', v => save('sidetone', [v])),
+      el('p', { className: 'note', textContent: 'How much of your own voice you hear in the headset while you talk.' })));
+  } else if (part === 'auto-off') {
+    if (!audio['auto-off']) box.append(failed('auto-off'));
+    else box.append(group('Turn off when idle', choices('Automatic power-off', [[0, 'Never'], [5, '5 min'], [15, '15 min'], [30, '30 min'], [45, '45 min'], [60, '60 min']],
+      audio['auto-off'][0], v => save('auto-off', [v])),
+      el('p', { className: 'note', textContent: 'The headset switches itself off after this long without sound.' })));
+  }
+  host.append(box);
+}
+let audioEditSlot = null; // the EQ slot open in the panel; null: the one playing
 
 // The live profile's games and apps: while one is in front, this profile comes up.
 function appsEditor(box) {
@@ -1499,6 +1940,7 @@ function zoneEditor(box, name) {
       else { record(name, { off: true }); await api('/api/off', { zone: name }); toast(label(name) + ' off · saved to ' + dev.active); }
     } catch (err) { toast(err.message, true); }
   };
+  if (studioOn(dev.profile)) box.append(el('p', { className: 'note', textContent: 'Studio is on, so the device shows its layers. This is what it shows by itself, with Secretarybird closed.' }));
   box.append(effectGroup(name),
     el('div', { className: 'edgroup' }, el('h3', { textContent: label(name) + ' color' }), presets, custom),
     el('div', { className: 'edgroup' }, el('h3', { textContent: 'Brightness' }), el('div', { className: 'row' }, bright, val),
@@ -1524,7 +1966,7 @@ function effectLabel(e) {
   const [kind, rest = ''] = e.split(':'), [arg, n] = rest.split('@');
   const name = (EFFECTS.find(x => x[0] === kind) || [kind, kind])[1];
   if (kind === 'wave') return `${name} ${arg === 'left' ? '←' : '→'}`;
-  if (arg && arg !== 'random') return name + ' #' + arg.split(',')[0];
+  if (arg && arg !== 'random') return name + ' ' + arg.split(',').map(c => '#' + c).join(' + ');
   return arg === 'random' ? name + ' · random' : name;
 }
 function effectGroup(name) {
@@ -1545,8 +1987,14 @@ function effectGroup(name) {
   const speed = el('input', { type: 'range', min: 1, max: 5, step: 1, value: kind === 'wave' ? (n0 || 3) : 3, ariaLabel: 'Wave speed' });
   const dur = el('select', { ariaLabel: 'Duration' });
   [['1', 'Short'], ['2', 'Medium'], ['3', 'Long']].forEach(([v, t]) => dur.append(new Option(t, v, false, v === (n0 || '2'))));
-  const rnd = el('input', { type: 'checkbox', id: 'fxRandom', checked: arg0 === 'random' });
-  const rndLabel = el('label', { htmlFor: 'fxRandom', textContent: 'Random colors' });
+  // Breathing and Starlight take one or two colors, or random ones (#81). The first is the
+  // zone's color above; the second has its own picker.
+  const [, second0] = (arg0 || '').split(',');
+  const colors = el('select', { ariaLabel: 'Colors' });
+  [['one', 'One color'], ['two', 'Two colors'], ['random', 'Random colors']].forEach(([v, t]) =>
+    colors.append(new Option(t, v, false, v === (arg0 === 'random' ? 'random' : second0 ? 'two' : 'one'))));
+  const second = el('input', { type: 'color', ariaLabel: 'Second color', value: '#' + (second0 || 'FFFFFF').toLowerCase() });
+  const secondWell = el('label', { className: 'swatch', title: 'Second color' }, second);
   const note = el('p', { className: 'note' });
   const show = () => {
     const k = sel.value;
@@ -1558,17 +2006,20 @@ function effectGroup(name) {
       : 'Runs on the device itself. Not every device has every effect; it says so if not.';
     dir.hidden = speed.hidden = k !== 'wave';
     dur.hidden = !(k === 'reactive' || k === 'starlight');
-    rnd.hidden = rndLabel.hidden = !(k === 'breathing' || k === 'starlight');
+    colors.hidden = !(k === 'breathing' || k === 'starlight');
+    secondWell.hidden = colors.hidden || colors.value !== 'two';
   };
   const send = async () => {
     show();
     const k = sel.value, color = zoneOf(dev.profile, name).color || '00FF00';
+    const picked = colors.value === 'random' ? 'random'
+      : colors.value === 'two' ? color + ',' + second.value.slice(1).toUpperCase() : color;
     if (k === 'static') return setColor(color, name);
     const text = k === 'spectrum' || k === 'battery' ? k
       : k === 'wave' ? `wave:${dir.value}@${speed.value}`
       : k === 'reactive' ? `reactive:${color}@${dur.value}`
-      : k === 'breathing' ? `breathing:${rnd.checked ? 'random' : color}`
-      : `starlight:${rnd.checked ? 'random' : color}@${dur.value}`;
+      : k === 'breathing' ? `breathing:${picked}`
+      : `starlight:${picked}@${dur.value}`;
     try {
       await api('/api/effect', { zone: name, effect: text });
       record(name, { effect: text, off: false });
@@ -1581,10 +2032,657 @@ function effectGroup(name) {
       show();
     }
   };
-  [sel, dir, speed, dur, rnd].forEach(c => c.onchange = send);
+  [sel, dir, speed, dur, colors, second].forEach(c => c.onchange = send);
   show();
   return el('div', { className: 'edgroup' }, el('h3', { textContent: 'Effect' }),
-    el('div', { className: 'row' }, sel, dir, speed, dur, rnd, rndLabel), note);
+    el('div', { className: 'row' }, sel, dir, speed, dur, colors, secondWell), note);
+}
+
+// ---------- Studio: layered lighting drawn by the tray ----------
+// The scene lives in the profile (`studio`), the tray renders it and streams frames. The
+// drawing shows the tray's own frames (/api/studio-frame), so what you see is what it sends.
+
+const FX = [
+  ['static', 'Static color'], ['gradient', 'Gradient'], ['breathing', 'Breathing'], ['spectrum', 'Spectrum cycling'],
+  ['wave', 'Wave'], ['wheel', 'Wheel'], ['blink', 'Blink'], ['reactive', 'Reactive'], ['ripple', 'Ripple'],
+  ['starlight', 'Starlight'], ['fire', 'Fire'], ['rain', 'Rain'], ['audio', 'Audio meter'], ['screen', 'Screen color'], ['battery', 'Battery'],
+];
+const FX_NAME = Object.fromEntries(FX);
+// One line under each effect in the gallery.
+const FX_HINT = {
+  static: 'One color', gradient: 'Colors across the device', breathing: 'Fades in and out', spectrum: 'Cycles through colors',
+  wave: 'Colors flow in a direction', wheel: 'Colors spin around', blink: 'On and off', reactive: 'Lights the key you press',
+  ripple: 'A ring from the key you press', starlight: 'Twinkling stars', fire: 'Flames from the bottom', rain: 'Drops falling',
+  audio: 'Follows what the PC plays', screen: 'Follows the screen', battery: 'Battery level as color',
+};
+// Which settings each effect has.
+const FX_USES = {
+  static: ['one'], gradient: ['colors', 'angle'], breathing: ['colors', 'speed'], spectrum: ['colors', 'speed'],
+  wave: ['colors', 'speed', 'angle', 'size'], wheel: ['colors', 'speed', 'size', 'reverse'], blink: ['colors', 'speed'],
+  reactive: ['colors', 'fade', 'size'], ripple: ['colors', 'speed', 'fade', 'size'], starlight: ['colors', 'speed', 'density', 'fade'],
+  fire: ['colors', 'speed', 'size'], rain: ['colors', 'speed', 'density', 'fade'], audio: ['colors', 'mode', 'angle'],
+  screen: ['mode', 'size'], battery: ['mode', 'angle'],
+};
+const SIZE_LABEL = { wave: 'Wave length', wheel: 'Arms', reactive: 'Reach', ripple: 'Ring width', fire: 'Flame height', screen: 'Color boost' };
+const MODES = {
+  audio: [['meter', 'Bar that fills'], ['pulse', 'Everything pulses'], ['stereo', 'Left and right channels']],
+  screen: [['meter', 'Each light its part of the screen'], ['pulse', 'Average of the whole screen']],
+  battery: [['meter', 'Bar, as full as the battery'], ['pulse', 'One color, green to red']],
+};
+// Colorless means rainbow for flowing effects, random for the ones that pick a color per spark.
+const RANDOMISH = ['breathing', 'reactive', 'ripple', 'starlight', 'rain', 'blink'];
+const SPARK_FX = ['reactive', 'ripple', 'starlight', 'rain'];
+const BLENDS = [['normal', 'Cover'], ['lit', 'Lit parts only'], ['add', 'Add'], ['max', 'Brighter of the two'], ['multiply', 'Multiply'], ['mask', 'Only where lit below']];
+const FX_DEFAULT_COLORS = { static: ['E8782A'], gradient: ['FF2800', '2850FF'], reactive: ['FFFFFF'], ripple: ['33CCFF'], fire: [], audio: [] };
+const FX_RAINBOW = ['FF2020', 'FFB020', '40E040', '20C0FF', '6040FF', 'FF30C0'];
+
+const newLayer = (kind, below) => ({
+  enabled: true, opacity: 100, target: { type: 'all' },
+  blend: below && SPARK_FX.includes(kind) ? 'lit' : 'normal',
+  fx: { kind, colors: [...(FX_DEFAULT_COLORS[kind] || [])], speed: 5, angle: 0, size: 5, density: 5, fade: 5, mode: 'meter' },
+});
+const withColors = (layer, colors) => ({ ...layer, fx: { ...layer.fx, colors } });
+
+// Starting points. Key sets fall back to every light on devices without those keys.
+const STUDIO_PRESETS = [
+  ['Ripple on a wave', 'A rainbow wave, rings where you press', 'ripple', () => [newLayer('wave'), withColors(newLayer('ripple', true), ['FFFFFF'])]],
+  ['Fire on WASD', 'Blue keys, flames on WASD', 'fire', () => [withColors(newLayer('static'), ['1030A0']), { ...newLayer('fire'), target: keySet('wasd') }]],
+  ['Reactive keys', 'Dark, each press lights up', 'reactive', () => [withColors(newLayer('static'), ['202028']), newLayer('reactive', true)]],
+  ['Night sky', 'Deep blue with white stars', 'starlight', () => [withColors(newLayer('static'), ['050A30']), withColors(newLayer('starlight', true), ['FFFFFF', '88AAFF'])]],
+  ['Music', 'A meter on a soft spectrum', 'audio', () => [{ ...newLayer('spectrum'), opacity: 25 }, newLayer('audio')]],
+  ['Screen ambient', 'The colors of your screen', 'screen', () => [newLayer('screen')]],
+  ['Rainbow rain', 'Colored drops falling', 'rain', () => [newLayer('rain')]],
+];
+
+let studio = null; // { scene, li (selected layer), view, stop (selected color), timer, box, lastColors }
+
+function studioScene() { return dev.profile.studio && dev.profile.studio.layers ? dev.profile.studio : { layers: [] }; }
+function studioOn(p) { return !!(p.studio && p.studio.layers && p.studio.layers.some(l => l.enabled !== false)); }
+function studioSummary(p) {
+  const ls = (p.studio && p.studio.layers) || [];
+  if (!ls.length) return 'Off';
+  const names = [...new Set(ls.filter(l => l.enabled !== false).map(l => FX_NAME[l.fx.kind] || l.fx.kind))];
+  return names.length ? names.slice(0, 3).join(' + ') + (names.length > 3 ? ' …' : '') : 'All layers off';
+}
+
+// The lights as drawn: grid keys from the board's layout, else one tile per zone.
+function studioLights() {
+  if (dev.matrix) {
+    const cols = dev.matrix.cols;
+    if (knownLayout(dev.matrix, dev.kind)) return layout(dev.matrix, dev.kind).map(k => ({ ...k, i: k.row * cols + k.col }));
+    return studioGuess(dev.matrix, dev.kind);
+  }
+  return dev.leds.map((l, i) => ({ label: label(l.name), zone: l.name, i, x: i * 3.5, y: 0, w: 3, h: 1.8 }));
+}
+// Boards whose key map isn't known yet: draw the closest known board so there are keys to
+// aim at, and every light it doesn't cover as a small cell around it (light bars, macro
+// columns). Studio only: remapping keeps to the verified maps. `guess` marks the result.
+const GUESS_BASES = [[6, 22, 'keyboard'], [6, 16, 'laptop'], [6, 18, 'keyboard'], [5, 15, 'keyboard']];
+function studioGuess(m, kind) {
+  const cols = m.cols, shift = (m.first ?? 1) - 1, out = [];
+  const mark = list => Object.assign(list, { guess: true });
+  // Keyboards lit in a few zones (Ornata V3): the whole board, each key in its zone's color.
+  if (m.rows === 1 && cols > 1 && (kind === 'keyboard' || kind === 'laptop')) {
+    const base = knownLayout(cols <= 8 ? { rows: 6, cols: 18 } : { rows: 6, cols: 22 }, 'keyboard');
+    const w = Math.max(...base.map(k => k.x + k.w));
+    return mark(base.map(k => { const z = Math.min(cols - 1, Math.floor((k.x + k.w / 2) / w * cols)); return { ...k, row: 0, col: z, i: z, zoneOf: cols }; }));
+  }
+  // Tartarus keypads: 20 numbered keys in four staggered rows, the rest as extra lights.
+  if (kind === 'keypad' && m.rows * cols <= 24) {
+    const cells = [];
+    for (let r = 0; r < m.rows; r++) for (let c = 0; c < cols; c++) if (m.rows === 1 || c < 5) cells.push([r, c]);
+    cells.slice(0, 20).forEach(([row, col], n) => out.push({ label: String(n + 1).padStart(2, '0'), row, col, i: row * cols + col,
+      x: n % 5 + Math.floor(n / 5) * .25, y: Math.floor(n / 5), w: 1, h: 1 }));
+  } else if (kind === 'keyboard' || kind === 'laptop') {
+    // The known board nearest in size; laptops prefer the Blade map.
+    const [rows, bcols, bkind] = GUESS_BASES.slice().sort((a, b) =>
+      (Math.abs(a[0] - m.rows) + Math.abs(a[1] - cols + shift) + (a[2] === kind ? 0 : 1)) -
+      (Math.abs(b[0] - m.rows) + Math.abs(b[1] - cols + shift) + (b[2] === kind ? 0 : 1)))[0];
+    const base = knownLayout({ rows, cols: rows === 6 && bcols === 22 ? 22 : bcols + shift, first: m.first }, bkind) || [];
+    base.filter(k => k.row < m.rows && k.col < cols && k.col >= 0).forEach(k => out.push({ ...k, i: k.row * cols + k.col }));
+  }
+  // Every light not drawn yet: rows under the board become a strip, columns at its sides.
+  const have = new Set(out.map(k => k.i));
+  const W = out.length ? Math.max(...out.map(k => k.x + k.w)) : cols, H = out.length ? Math.max(...out.map(k => k.y + k.h)) : 0;
+  const lastRow = out.length ? Math.max(...out.map(k => k.row)) : -1;
+  const used = out.map(k => k.col), minC = Math.min(...used, cols), maxC = Math.max(...used, -1);
+  for (let row = 0; row < m.rows; row++) for (let col = 0; col < cols; col++) {
+    const i = row * cols + col;
+    if (have.has(i)) continue;
+    if (!out.length) { out.push({ label: '', row, col, i, x: col, y: row, w: 1, h: 1, extra: true }); continue; }
+    if (row > lastRow) out.push({ label: '', row, col, i, x: col / cols * W, y: H + .3 + (row - lastRow - 1) * .55, w: W / cols - .08, h: .45, extra: true });
+    else if (col < minC) out.push({ label: '', row, col, i, x: -1.3 - (minC - 1 - col) * .9, y: row * 1.05, w: .8, h: .8, extra: true });
+    else if (col > maxC) out.push({ label: '', row, col, i, x: W + .3 + (col - maxC - 1) * .9, y: row * 1.05, w: .8, h: .8, extra: true });
+  }
+  // Cells between the drawn keys are left out, as on the verified maps.
+  const minX = Math.min(...out.map(k => k.x)), minY = Math.min(...out.map(k => k.y));
+  return mark(out.map(k => ({ ...k, x: k.x - minX, y: k.y - minY })));
+}
+function keySet(name) {
+  if (!dev.matrix) return { type: 'all' };
+  const names = { wasd: ['w', 'a', 's', 'd'], arrows: ['up', 'down', 'left', 'right'],
+    frow: ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12'],
+    numbers: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'] }[name];
+  const lights = studioLights();
+  const picked = name === 'numpad' ? lights.filter(k => k.name && k.name.startsWith('num'))
+    : name === 'letters' ? lights.filter(k => k.name && /^[a-z]$/.test(k.name))
+    : lights.filter(k => names && names.includes(k.name));
+  return picked.length ? { type: 'keys', list: [...new Set(picked.map(k => k.i))].sort((a, b) => a - b) } : { type: 'all' };
+}
+
+const saveScene = live(scene => api('/api/studio', { data: scene.layers.length ? scene : null }), () => null);
+function studioChanged(rebuild) {
+  dev.profile.studio = studio.scene.layers.length ? studio.scene : undefined;
+  saveScene(studio.scene);
+  refreshCell('studio');
+  if (rebuild) renderStudio();
+}
+
+function studioEditor(box) {
+  stopStudio();
+  studio = { scene: structuredClone(studioScene()), li: 0, view: 'settings', stop: 0, timer: null, box, lastColors: null, devId: dev.id };
+  studio.li = Math.max(0, studio.scene.layers.length - 1);
+  box.classList.add('studiobox');
+  // The tray maps key presses and wave positions with the drawing's key places.
+  if (dev.matrix && knownLayout(dev.matrix, dev.kind)) {
+    const data = studioLights().map(k => ({ cell: k.i, name: k.name || '', x: k.x, y: k.y }));
+    api('/api/studio-layout', { data }).catch(() => {});
+  }
+  renderStudio();
+  pollStudio();
+}
+function stopStudio() { if (studio && studio.timer) clearTimeout(studio.timer); studio = null; }
+
+async function pollStudio() {
+  const me = studio;
+  if (!me || !document.body.contains(me.box) || me.box.closest('[hidden]')) { if (studio === me) stopStudio(); return; }
+  try {
+    const r = await api('/api/studio-frame', {});
+    paintStudio(r.colors);
+    setStudioStatus(!studio.scene.layers.length ? ['idle', 'No layers: the device shows its zone colors']
+      : r.failing ? ['err', 'Not taking frames. Asleep? Secretarybird keeps trying']
+      : r.streaming ? ['live', 'Live on the device']
+      : dev.lighting_control ? ['wait', 'Starting…'] : ['idle', 'Lighting control is off for this device']);
+  } catch { }
+  if (studio === me) me.timer = setTimeout(pollStudio, 66);
+}
+function setStudioStatus([state, text]) {
+  const st = $('studioStatus'); if (!st) return;
+  if (st.dataset.state !== state) st.dataset.state = state;
+  if (st.lastChild.textContent !== text) st.lastChild.textContent = text;
+}
+function paintStudio(colors) {
+  if (studio) studio.lastColors = colors;
+  const svg = $('studioKb'); if (!svg) return;
+  svg.querySelectorAll('g.key').forEach(g => {
+    const c = colors[+g.dataset.i], lit = c && c !== '000000';
+    const lamp = g.querySelector('.lamp');
+    if (lamp) {
+      // Zone module: the bar takes the color, the text below says what it is.
+      lamp.style.fill = lit ? '#' + c : '';
+      const hex = g.querySelector('.zh');
+      if (hex) hex.textContent = lit ? '#' + c.toUpperCase() : 'OFF';
+      return;
+    }
+    g.querySelector('.body').style.fill = lit ? '#' + c : '';
+    const n = parseInt(c || '0', 16), lum = 0.3 * (n >> 16) + 0.59 * (n >> 8 & 255) + 0.11 * (n & 255);
+    const t = g.querySelector('text');
+    if (t) t.style.fill = lum > 140 ? '#000000d0' : lit ? '#ffffffe6' : '';
+  });
+  svg.querySelectorAll('rect.glow').forEach(r => {
+    const c = colors[+r.dataset.i];
+    r.style.fill = c && c !== '000000' ? '#' + c : 'transparent';
+  });
+}
+
+// ----- Effect thumbnails: small CSS loops that look like each effect, in the layer's colors -----
+function fxThumb(kind, colors, small) {
+  const cs = colors && colors.length ? colors : FX_RAINBOW;
+  const c = i => '#' + cs[i % cs.length];
+  const th = el('span', { className: 'fxth th-' + kind + (small ? ' sm' : ''), ariaHidden: 'true' });
+  th.style.setProperty('--c1', c(0));
+  th.style.setProperty('--c2', c(1));
+  // The still picture (layer list): the effect's colors, or what it shows when it picks them.
+  const still = !colors.length && kind === 'fire' ? 'linear-gradient(90deg, #ff2200, #ff9a00, #ffe070)'
+    : !colors.length && kind === 'audio' ? 'linear-gradient(90deg, #00d040, #ffd000, #ff2a00)'
+    : kind === 'battery' ? '#30d050' : kind === 'screen' ? 'linear-gradient(90deg, #22446e, #b07440, #3e7350, #6a3f86)'
+    : `linear-gradient(90deg, ${cs.map(x => '#' + x).join(', ')}${cs.length === 1 ? ', #' + cs[0] : ''})`;
+  th.style.setProperty('--grad', `linear-gradient(90deg, ${cs.map(x => '#' + x).join(', ')}${cs.length === 1 ? ', #' + cs[0] : ''})`);
+  th.style.setProperty('--still', still);
+  th.style.setProperty('--conic', `conic-gradient(${[...cs, cs[0]].map(x => '#' + x).join(', ')})`);
+  th.style.setProperty('--loop', `linear-gradient(90deg, ${[...cs, cs[0]].map(x => '#' + x).join(', ')})`);
+  const cells = (n, fn) => { for (let i = 0; i < n; i++) { const s = el('i'); fn(s, i); th.append(s); } };
+  const rnd = i => ((i * 7919) % 97) / 97; // stable scatter
+  if (['reactive', 'ripple', 'starlight', 'blink'].includes(kind)) {
+    cells(10, (s, i) => {
+      s.style.background = kind === 'starlight' || colors.length === 0 && kind !== 'blink' ? c(i) : c(0);
+      s.style.animationDelay = kind === 'ripple' ? Math.abs(i - 4.5) * 0.12 + 's'
+        : kind === 'blink' ? '0s' : (rnd(i) * 2.4).toFixed(2) + 's';
+    });
+  } else if (kind === 'fire') {
+    cells(10, (s, i) => { s.style.animationDelay = (rnd(i + 3) * 0.9).toFixed(2) + 's'; s.style.animationDuration = (0.6 + rnd(i) * 0.5).toFixed(2) + 's'; if (colors.length) s.style.background = `linear-gradient(to top, ${c(0)}, ${c(1)})`; });
+  } else if (kind === 'rain') {
+    cells(7, (s, i) => { s.style.background = c(i); s.style.left = (6 + i * 14) + '%'; s.style.animationDelay = (rnd(i + 1) * 1.4).toFixed(2) + 's'; });
+  } else if (kind === 'audio') {
+    cells(10, (s, i) => { s.style.animationDelay = (rnd(i + 5) * 0.8).toFixed(2) + 's'; s.style.animationDuration = (0.45 + rnd(i) * 0.5).toFixed(2) + 's'; if (colors.length) s.style.background = `linear-gradient(to top, ${c(0)}, ${c(1)})`; });
+  } else if (kind === 'battery') {
+    th.append(el('i'));
+  }
+  return th;
+}
+
+function renderStudio() {
+  const box = studio.box;
+  box.innerHTML = '';
+  const ls = studio.scene.layers;
+  if (studio.li >= ls.length) studio.li = Math.max(0, ls.length - 1);
+  const layer = ls[studio.li];
+  if (!ls.length && studio.view === 'settings') studio.view = 'empty';
+  if (ls.length && studio.view === 'empty') studio.view = 'settings';
+
+  // Left: the device on a dark stage, glowing with the frames the tray sends.
+  const lights = studioLights();
+  const w = Math.max(...lights.map(k => k.x + k.w), 1), h = Math.max(...lights.map(k => k.y + k.h), 1);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'studioKb';
+  svg.setAttribute('viewBox', `-0.6 -0.6 ${w + 1.2} ${h + 1.2}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Live view of the lights. Click or drag across lights to choose which ones the layer covers.');
+  const covered = layer ? coveredSet(layer, lights) : new Set();
+  const picked = layer && layer.target && layer.target.type !== 'all';
+  const r = dev.matrix ? .14 : .26, blur = dev.matrix ? .32 : .5;
+  if (picked) svg.classList.add('picking');
+  const ring = (k, o, cls) => `<rect class="${cls}" x="${k.x - o}" y="${k.y - o}" width="${k.w + 2 * o}" height="${k.h + 2 * o}" rx="${r + o}"/>`;
+  const zone = k => {
+    const cx = k.x + k.w / 2, bx = k.x + .28, bw = k.w - .56;
+    return `<rect class="lamp" x="${bx}" y="${k.y + .3}" width="${bw}" height=".3" rx=".15"/>` +
+      `<text class="zl" x="${cx}" y="${k.y + 1.02}">${esc(k.label)}</text>` +
+      `<text class="zh" x="${cx}" y="${k.y + 1.38}">OFF</text>` +
+      `<g class="badge" transform="translate(${k.x + k.w - .02} ${k.y + .02})"><circle r=".2"/><path d="M-.085 0l.06.06l.11-.12"/></g>`;
+  };
+  // Zone modules glow from the bar; keys glow from the whole cap.
+  svg.innerHTML = `<defs><filter id="stBloom" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="${blur}"/></filter></defs>` +
+    `<g class="bloom" filter="url(#stBloom)">${lights.map(k => dev.matrix
+      ? `<rect class="glow" data-i="${k.i}" x="${k.x}" y="${k.y}" width="${k.w}" height="${k.h}" rx="${r}"/>`
+      : `<rect class="glow" data-i="${k.i}" x="${k.x + .1}" y="${k.y - .1}" width="${k.w - .2}" height="1" rx=".5"/>`).join('')}</g>` +
+    lights.map(k => `<g class="key${layer && (picked ? covered.has(k.i) : !dev.matrix) ? ' in' : ''}" data-i="${k.i}">${ring(k, .09, 'ring-back')}${ring(k, .09, 'ring')}` +
+      `<rect class="body" x="${k.x + .05}" y="${k.y + .05}" width="${k.w - .1}" height="${k.h - .1}" rx="${r}"/>` +
+      (dev.matrix ? `<text x="${k.x + k.w / 2}" y="${k.y + k.h / 2}">${esc(k.label)}</text>` : zone(k)) + '</g>').join('');
+  let painting = null;
+  const hit = e => { const g = document.elementFromPoint(e.clientX, e.clientY); return g && g.closest && g.closest('#studioKb g.key'); };
+  svg.onpointerdown = e => { const g = hit(e); if (!g || !layer) return; e.preventDefault(); painting = !g.classList.contains('in') || !picked; toggleLight(layer, +g.dataset.i, painting, lights); };
+  svg.onpointermove = e => { if (painting === null) return; const g = hit(e); if (g && g.classList.contains('in') !== painting) toggleLight(layer, +g.dataset.i, painting, lights); };
+  svg.onpointerup = svg.onpointerleave = () => { if (painting !== null) { painting = null; studioChanged(true); } };
+
+  const status = el('p', { className: 'st-status', id: 'studioStatus', role: 'status' }, el('i'), el('span', { textContent: '' }));
+  status.dataset.state = 'wait';
+
+  const quick = el('div', { className: 'row' });
+  const setTarget = t => { if (!layer) return; layer.target = t; studioChanged(true); };
+  const isAll = !picked;
+  quick.append(el('button', { className: 'pill', textContent: 'All lights', ariaPressed: isAll, onclick: () => setTarget({ type: 'all' }) }));
+  if (dev.matrix && lights.some(k => k.name) && !lights.some(k => k.zoneOf)) {
+    [['wasd', 'WASD'], ['arrows', 'Arrows'], ['frow', 'F keys'], ['numbers', 'Numbers'], ['letters', 'Letters'], ['numpad', 'Numpad']]
+      .forEach(([k, t]) => { const set = keySet(k); if (set.type !== 'keys') return;
+        const same = picked && layer.target.type === 'keys' && JSON.stringify(layer.target.list) === JSON.stringify(set.list);
+        quick.append(el('button', { className: 'pill', textContent: t, ariaPressed: same, onclick: () => setTarget(set) })); });
+  }
+  quick.append(el('button', { className: 'pill', textContent: 'Invert', disabled: !layer || isAll, onclick: () => {
+    const now = coveredSet(layer, lights), rest = lights.map(k => k.i).filter(i => !now.has(i));
+    setTarget(dev.matrix ? { type: 'keys', list: [...new Set(rest)] } : { type: 'zones', list: lights.filter(k => rest.includes(k.i)).map(k => k.zone) });
+  } }));
+
+  const total = new Set(lights.map(k => k.i)).size, noun = dev.matrix && !lights.some(k => k.zoneOf) ? 'keys' : dev.matrix ? 'zones' : 'lights';
+  const reach = total === 1 ? 'the one light' : isAll ? `all <span class="num">${total}</span> ${noun}` : `<span class="num">${covered.size}</span> of <span class="num">${total}</span> ${noun}`;
+  const stage = el('div', { className: 'st-stage' },
+    el('div', { className: 'st-kb' + (dev.matrix ? '' : ' zones') }, svg),
+    status,
+    lights.guess ? el('p', { className: 'note', textContent: lights.some(k => k.zoneOf)
+      ? `This board lights in ${dev.matrix.cols} zones, not per key: each key shows its zone's color.`
+      : 'Key places on this board are estimated from a similar one. Small cells are lights beyond the keys (light bars, side columns). “Find which light is which key” under the device’s per-key lighting shows the real places.' }) : '',
+    layer ? el('div', { className: 'edgroup' },
+      el('h3', { innerHTML: `${esc(layerName(layer, studio.li))} covers ${reach}` }),
+      quick, el('p', { className: 'note', textContent: 'Click or drag across the drawing to pick lights for this layer.' })) : '',
+    ls.length ? sceneGroup() : '');
+
+  // Right: layers on top, then either the selected layer's settings, the effect gallery, or the
+  // scenes to start from.
+  const side = el('div', { className: 'st-side' }, layersGroup(ls));
+  if (studio.view === 'gallery') side.append(effectGallery(layer));
+  else if (studio.view === 'empty') side.append(startScenes());
+  else if (layer) side.append(layerSettings(layer));
+  box.append(stage, side);
+  if (studio.lastColors) paintStudio(studio.lastColors);
+}
+
+function sceneGroup() {
+  const ls = studio.scene.layers;
+  const others = devices.some(d => d !== dev && d.lighting_control && (d.leds.length || d.matrix));
+  return el('div', { className: 'edgroup' }, el('h3', { textContent: 'Scene' }), el('div', { className: 'row' },
+      others && ls.length ? el('button', { className: 'ghost', textContent: 'Use on every device', title: 'Same layers on every device with lighting control on. Key picks become all lights there.', onclick: studioEverywhere }) : '',
+      ls.length ? el('button', { className: 'ghost', textContent: 'Turn Studio off', onclick: () => {
+        const before = structuredClone(studio.scene); studio.scene = { layers: [] }; studioChanged(true);
+        toast('Studio off · zone colors are back', false, () => { studio.scene = before; studioChanged(true); });
+      } }) : ''),
+    el('p', { className: 'note', textContent: 'Runs while Secretarybird is running. Closed, the device shows its zone colors. Wireless devices get 10 frames a second to save battery.' }));
+}
+
+function layersGroup(ls) {
+  const lights = studioLights();
+  const list = el('ol', { className: 'layers', ariaLabel: 'Layers, top first' });
+  [...ls.keys()].reverse().forEach(i => {
+    const l = ls[i];
+    const on = el('input', { type: 'checkbox', checked: l.enabled !== false, ariaLabel: 'Layer ' + layerName(l, i) + ' on', title: 'On or off',
+      onclick: e => e.stopPropagation(), onchange: e => { l.enabled = e.target.checked; studioChanged(true); } });
+    const open = () => { studio.li = i; studio.view = 'settings'; studio.stop = 0; renderStudio(); };
+    const li = el('li', { ariaCurrent: i === studio.li && studio.view !== 'empty', tabIndex: 0, onclick: open,
+      onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } } },
+      on, fxThumb(l.fx.kind, l.fx.colors || [], true), el('span', { className: 'lname', textContent: layerName(l, i) }), el('small', { textContent: l.fx.kind === 'battery' && dev.battery == null ? 'No battery here' : targetText(l, lights) }));
+    if (l.enabled === false) li.classList.add('off');
+    list.append(li);
+  });
+  const move = d => { const i = studio.li, j = i + d; if (j < 0 || j >= ls.length) return; [ls[i], ls[j]] = [ls[j], ls[i]]; studio.li = j; studioChanged(true); };
+  const layer = ls[studio.li];
+  const adding = studio.view === 'gallery' && studio.galleryFor === 'add';
+  const tools = el('div', { className: 'row st-ltools' },
+    el('button', { className: 'ghost' + (adding ? ' on' : ''), innerHTML: icon('plus') + ' Add layer', ariaPressed: adding,
+      onclick: () => { studio.view = adding ? (ls.length ? 'settings' : 'empty') : 'gallery'; studio.galleryFor = 'add'; renderStudio(); } }),
+    el('span', { className: 'grow' }),
+    el('button', { className: 'ghost icon', innerHTML: icon('up'), title: 'Move up', ariaLabel: 'Move layer up', disabled: !layer || studio.li >= ls.length - 1, onclick: () => move(1) }),
+    el('button', { className: 'ghost icon', innerHTML: icon('down'), title: 'Move down', ariaLabel: 'Move layer down', disabled: !layer || studio.li <= 0, onclick: () => move(-1) }),
+    el('button', { className: 'ghost icon', innerHTML: icon('copy'), title: 'Duplicate', ariaLabel: 'Duplicate layer', disabled: !layer, onclick: () => { ls.splice(studio.li + 1, 0, structuredClone(layer)); studio.li++; studioChanged(true); } }),
+    el('button', { className: 'ghost icon', innerHTML: icon('trash'), title: 'Delete', ariaLabel: 'Delete layer', disabled: !layer, onclick: () => {
+      const before = structuredClone(studio.scene); ls.splice(studio.li, 1); studioChanged(true);
+      toast('Layer deleted', false, () => { studio.scene = before; studioChanged(true); });
+    } }));
+  return el('div', { className: 'edgroup' }, el('h3', { textContent: 'Layers · top covers bottom' }), tools, ls.length ? list : '');
+}
+
+// Every effect as a small moving picture; picking one adds a layer or swaps this one's effect.
+function effectGallery(layer) {
+  const swap = studio.galleryFor === 'swap' && layer;
+  const ls = studio.scene.layers;
+  const grid = el('div', { className: 'fxgrid', role: 'list' });
+  FX.forEach(([kind, name]) => {
+    const colors = swap && layer.fx.colors && layer.fx.colors.length && kind !== 'fire' && kind !== 'audio' ? layer.fx.colors : FX_DEFAULT_COLORS[kind] || [];
+    const noBattery = kind === 'battery' && dev.battery == null;
+    const b = el('button', { className: 'fxcard', role: 'listitem', ariaPressed: !!swap && layer.fx.kind === kind, disabled: noBattery,
+      title: noBattery ? devLabel(dev) + ' reports no battery (wired), so this effect would stay dark' : FX_HINT[kind],
+      onclick: () => {
+        if (swap) {
+          const keep = layer.fx.colors && layer.fx.colors.length ? layer.fx.colors : FX_DEFAULT_COLORS[kind] || [];
+          layer.fx = { ...newLayer(kind).fx, colors: kind === 'static' ? keep.slice(0, 1) : [...keep], speed: layer.fx.speed, angle: layer.fx.angle };
+          if (!layer.name) delete layer.name;
+        } else {
+          ls.push(newLayer(kind, ls.length > 0)); studio.li = ls.length - 1;
+        }
+        studio.view = 'settings'; studio.stop = 0; studioChanged(true);
+      } }, fxThumb(kind, colors), el('b', { textContent: name }), el('small', { textContent: noBattery ? 'No battery on this device' : FX_HINT[kind] }));
+    grid.append(b);
+  });
+  return el('div', { className: 'edgroup' },
+    el('div', { className: 'st-head' }, el('h3', { textContent: swap ? 'Change the effect of ' + layerName(layer, studio.li) : 'Add an effect on top' }),
+      el('button', { className: 'xbtn', innerHTML: icon('x'), ariaLabel: 'Close the effects', title: 'Close', onclick: () => { studio.view = ls.length ? 'settings' : 'empty'; renderStudio(); } })),
+    grid);
+}
+
+// No layers yet: whole scenes to start from, and the single effects.
+function startScenes() {
+  const grid = el('div', { className: 'scenegrid' });
+  STUDIO_PRESETS.forEach(([name, hint, kind, make]) => grid.append(el('button', { className: 'scenecard', onclick: () => {
+    studio.scene = { layers: make() }; studio.li = studio.scene.layers.length - 1; studio.view = 'settings'; studioChanged(true);
+    toast(name + ' · saved to ' + dev.active, false, () => { studio.scene = { layers: [] }; studioChanged(true); });
+  } }, fxThumb(kind, kind === 'starlight' ? ['FFFFFF', '88AAFF'] : FX_DEFAULT_COLORS[kind] || []), el('b', { textContent: name }), el('small', { textContent: hint }))));
+  return el('div', { className: 'edgroup' }, el('h3', { textContent: 'Start from a scene' }), grid,
+    el('p', { className: 'note', textContent: 'Or add one effect with Add layer, and stack more on top.' }));
+}
+
+function coveredSet(layer, lights) {
+  const t = layer.target || { type: 'all' };
+  if (t.type === 'keys') return new Set((t.list || []).filter(i => lights.some(k => k.i === i)));
+  if (t.type === 'zones') return new Set(lights.filter(k => (t.list || []).includes(k.zone || 'backlight')).map(k => k.i));
+  return new Set(lights.map(k => k.i));
+}
+function toggleLight(layer, i, add, lights) {
+  // Picking from "all lights" starts an empty pick.
+  const now = layer.target && layer.target.type !== 'all' ? coveredSet(layer, lights) : new Set();
+  if (!layer.target || layer.target.type === 'all') document.querySelectorAll('#studioKb g.key.in').forEach(x => x.classList.remove('in'));
+  const kb = $('studioKb'); if (kb) kb.classList.add('picking');
+  if (add) now.add(i); else now.delete(i);
+  layer.target = dev.matrix ? { type: 'keys', list: [...now].sort((a, b) => a - b) }
+    : { type: 'zones', list: lights.filter(k => now.has(k.i)).map(k => k.zone) };
+  document.querySelectorAll(`#studioKb g.key[data-i="${i}"]`).forEach(x => x.classList.toggle('in', add));
+}
+function layerName(l, i) { return l.name || FX_NAME[l.fx.kind] || ('Layer ' + (i + 1)); }
+function layerPaint(l) {
+  const c = l.fx.colors || [];
+  if (l.fx.kind === 'static' || c.length === 1) return '#' + (c[0] || 'FFFFFF');
+  if (c.length) return `linear-gradient(90deg, ${c.map(x => '#' + x).join(', ')})`;
+  return `linear-gradient(90deg, ${FX_RAINBOW.map(x => '#' + x).join(', ')})`;
+}
+function targetText(l, lights) {
+  const t = l.target || { type: 'all' }, n = coveredSet(l, lights).size;
+  const blend = l.blend && l.blend !== 'normal' ? ' · ' + (BLENDS.find(b => b[0] === l.blend) || [, l.blend])[1].toLowerCase() : '';
+  const op = l.opacity != null && l.opacity < 100 ? ` · ${l.opacity}%` : '';
+  return (t.type === 'all' ? 'All' : plural(n, dev.matrix ? 'key' : 'zone')) + blend + op;
+}
+
+function studioSlider(labelText, value, min, max, onChange, fmt) {
+  const val = el('span', { className: 'val num', textContent: fmt ? fmt(value) : value });
+  const r = el('input', { type: 'range', min, max, step: 1, value, ariaLabel: labelText,
+    oninput: e => { val.textContent = fmt ? fmt(+e.target.value) : e.target.value; onChange(+e.target.value); } });
+  return el('label', { className: 'st-field' }, el('span', { textContent: labelText }), el('div', { className: 'row' }, r, val));
+}
+
+// Colors as a strip: the gradient the layer draws, its stops under it (click one to pick it),
+// LED presets that drop into the picked stop, and a chip for rainbow or random colors.
+function colorStrip(fx, single, touch) {
+  const colors = fx.colors || (fx.colors = []);
+  if (single && !colors.length) colors.push('FFFFFF');
+  const min = single ? 1 : fx.kind === 'gradient' ? 2 : 0, max = single ? 1 : 8;
+  if (studio.stop >= colors.length) studio.stop = Math.max(0, colors.length - 1);
+  const free = !colors.length;
+  const freeName = RANDOMISH.includes(fx.kind) ? 'Random' : fx.kind === 'fire' ? 'Fire colors' : fx.kind === 'audio' ? 'Green to red' : 'Rainbow';
+  const bar = el('div', { className: 'cbar' + (free ? ' free' : '') });
+  bar.style.background = free ? (fx.kind === 'fire' ? 'linear-gradient(90deg, #200000, #ff2a00, #ffb000, #fff070)'
+    : fx.kind === 'audio' ? 'linear-gradient(90deg, #00e040, #ffd000, #ff2000)'
+    : RANDOMISH.includes(fx.kind) ? `repeating-linear-gradient(90deg, ${FX_RAINBOW.map((x, i) => `#${x} ${i * 9}% ${(i + 1) * 9}%`).join(', ')})`
+    : `linear-gradient(90deg, ${FX_RAINBOW.map(x => '#' + x).join(', ')})`)
+    : colors.length === 1 ? '#' + colors[0] : `linear-gradient(90deg, ${colors.map(x => '#' + x).join(', ')})`;
+  const stops = el('div', { className: 'cstops', role: 'radiogroup', ariaLabel: 'Colors', hidden: colors.length < 2 });
+  colors.forEach((c, i) => {
+    const s = el('button', { className: 'cstop', role: 'radio', ariaChecked: i === studio.stop, ariaLabel: `Color ${i + 1} of ${colors.length}, #${c}`,
+      title: '#' + c, onclick: () => { studio.stop = i; touch(true); } });
+    s.style.background = '#' + c;
+    stops.append(s);
+  });
+  const cur = colors[studio.stop];
+  const pick = el('input', { type: 'color', ariaLabel: 'Any color', value: '#' + (cur || 'FF2800').toLowerCase(), disabled: free,
+    oninput: e => { colors[studio.stop] = e.target.value.slice(1).toUpperCase(); bar.style.background = colors.length === 1 ? e.target.value : `linear-gradient(90deg, ${colors.map(x => '#' + x).join(', ')})`;
+      stops.children[studio.stop].style.background = e.target.value; hex.value = e.target.value.toUpperCase(); touch(false); },
+    onchange: () => touch(true) });
+  const well = el('label', { className: 'swatch' + (free ? ' none' : ''), title: 'Any color' }, pick);
+  const hex = el('input', { type: 'text', className: 'hex', maxLength: 7, ariaLabel: 'Hex color', value: cur ? '#' + cur : '', placeholder: 'None', disabled: free,
+    onchange: e => { const v = e.target.value.replace('#', '').toUpperCase(); if (/^[0-9A-F]{6}$/.test(v)) { colors[studio.stop] = v; touch(true); } else toast('Use six hex digits, like FF2800', true); } });
+  const edit = el('div', { className: 'row' }, well, hex,
+    !single ? el('button', { className: 'ghost icon', innerHTML: icon('plus'), title: 'Add a color', ariaLabel: 'Add a color', disabled: colors.length >= max,
+      onclick: () => { colors.splice(colors.length ? studio.stop + 1 : 0, 0, colors.length ? colors[studio.stop] : 'FF2800'); studio.stop = colors.length > 1 ? studio.stop + 1 : 0; touch(true); } }) : '',
+    !single ? el('button', { className: 'ghost icon', innerHTML: icon('minus'), title: 'Remove this color', ariaLabel: 'Remove the picked color', disabled: colors.length <= min || free,
+      onclick: () => { colors.splice(studio.stop, 1); studio.stop = Math.max(0, studio.stop - 1); touch(true); } }) : '',
+    !single ? el('button', { className: 'pill', textContent: freeName, ariaPressed: free, disabled: min > 0,
+      title: free ? 'Add a color to choose your own' : 'Let the effect pick colors', onclick: () => { if (free) { colors.push('FF2800'); } else { colors.length = 0; } studio.stop = 0; touch(true); } }) : '');
+  const presets = el('div', { className: 'cpresets', role: 'group', ariaLabel: 'Preset colors' });
+  PRESETS.forEach(([p, n]) => presets.append(el('button', { title: n + ' #' + p, ariaLabel: n, ariaPressed: cur === p, style: `background:#${p}`,
+    onclick: () => { if (free) { colors.push(p); studio.stop = 0; } else colors[studio.stop] = p; touch(true); } })));
+  return el('div', { className: 'st-colors' }, el('div', { className: 'cstrip' }, bar, stops), edit, presets);
+}
+
+// Direction as a dial: drag the needle, or arrow keys (Shift for 45° steps).
+function angleDial(fx, touch) {
+  const words = a => ({ 0: 'Left to right', 45: 'Top left to bottom right', 90: 'Top to bottom', 135: 'Top right to bottom left', 180: 'Right to left', 225: 'Bottom right to top left', 270: 'Bottom to top', 315: 'Bottom left to top right' }[a] || a + '°');
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 64 64'); svg.setAttribute('class', 'dial');
+  svg.setAttribute('role', 'slider'); svg.setAttribute('tabindex', '0'); svg.setAttribute('aria-label', 'Direction');
+  svg.setAttribute('aria-valuemin', '0'); svg.setAttribute('aria-valuemax', '359');
+  let ticks = '';
+  for (let a = 0; a < 360; a += 45) { const r = a * Math.PI / 180; ticks += `<line x1="${32 + Math.cos(r) * 25}" y1="${32 + Math.sin(r) * 25}" x2="${32 + Math.cos(r) * 28}" y2="${32 + Math.sin(r) * 28}"/>`; }
+  svg.innerHTML = `<circle class="dring" cx="32" cy="32" r="29"/><g class="dticks">${ticks}</g><line class="dneedle" x1="32" y1="32" x2="32" y2="32"/><circle class="dhub" cx="32" cy="32" r="3"/><circle class="dknob" cx="32" cy="32" r="5"/>`;
+  const val = el('span', { className: 'val num' }), txt = el('small', { className: 'note' });
+  const draw = a => {
+    const r = a * Math.PI / 180, x = 32 + Math.cos(r) * 21, y = 32 + Math.sin(r) * 21;
+    const n = svg.querySelector('.dneedle'); n.setAttribute('x2', x); n.setAttribute('y2', y);
+    const k = svg.querySelector('.dknob'); k.setAttribute('cx', x); k.setAttribute('cy', y);
+    svg.setAttribute('aria-valuenow', a); svg.setAttribute('aria-valuetext', words(a));
+    val.textContent = a + '°'; txt.textContent = words(a);
+  };
+  const set = (a, done) => { a = ((Math.round(a) % 360) + 360) % 360; fx.angle = a; draw(a); touch(false); };
+  const fromPointer = e => {
+    const b = svg.getBoundingClientRect();
+    let a = Math.atan2(e.clientY - (b.top + b.height / 2), e.clientX - (b.left + b.width / 2)) * 180 / Math.PI;
+    a = (a + 360) % 360;
+    const near = Math.round(a / 45) * 45; // the eight directions pull the needle in
+    return Math.abs(a - near) < 6 ? near % 360 : Math.round(a / 5) * 5;
+  };
+  let drag = false;
+  svg.onpointerdown = e => { drag = true; svg.setPointerCapture(e.pointerId); set(fromPointer(e)); e.preventDefault(); };
+  svg.onpointermove = e => { if (drag) set(fromPointer(e)); };
+  svg.onpointerup = svg.onpointercancel = () => { drag = false; };
+  svg.onkeydown = e => {
+    const step = e.shiftKey ? 45 : 5, a = fx.angle || 0;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { set(a + step); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { set(a - step); e.preventDefault(); }
+  };
+  draw(fx.angle || 0);
+  return el('div', { className: 'st-field' }, el('span', { textContent: 'Direction' }), el('div', { className: 'row dialrow' }, svg, el('div', { className: 'dialtext' }, val, txt)));
+}
+
+function layerSettings(l) {
+  const fx = l.fx, uses = FX_USES[fx.kind] || [];
+  const touch = rebuild => studioChanged(rebuild);
+  const g = el('div', { className: 'edgroup st-settings' });
+  // The effect, as its moving picture: click to swap it from the gallery.
+  g.append(el('button', { className: 'fxcurrent', title: 'Change the effect', ariaLabel: 'Effect: ' + FX_NAME[fx.kind] + '. Change it',
+    onclick: () => { studio.view = 'gallery'; studio.galleryFor = 'swap'; renderStudio(); } },
+    fxThumb(fx.kind, fx.colors || []), el('span', {}, el('b', { textContent: FX_NAME[fx.kind] }), el('small', { textContent: FX_HINT[fx.kind] })),
+    el('span', { className: 'fxchange', textContent: 'Change' })));
+  if (uses.includes('one') || uses.includes('colors')) g.append(el('div', { className: 'st-field top' }, el('span', { textContent: uses.includes('one') ? 'Color' : 'Colors' }), colorStrip(fx, uses.includes('one'), touch)));
+  if (uses.includes('mode')) {
+    const m = el('select', { ariaLabel: 'Style', onchange: e => { fx.mode = e.target.value; touch(true); } });
+    (MODES[fx.kind] || []).forEach(([v, t]) => m.append(new Option(t, v, false, v === (fx.mode || 'meter'))));
+    g.append(el('label', { className: 'st-field' }, el('span', { textContent: 'Style' }), m));
+  }
+  if (uses.includes('angle') && !(fx.kind === 'audio' && fx.mode && fx.mode !== 'meter') && !(fx.kind === 'battery' && fx.mode === 'pulse')) g.append(angleDial(fx, touch));
+  if (uses.includes('speed')) g.append(studioSlider('Speed', fx.speed ?? 5, 1, 10, v => { fx.speed = v; touch(false); }));
+  if (uses.includes('size')) g.append(studioSlider(SIZE_LABEL[fx.kind] || 'Size', fx.size ?? 5, 1, 10, v => { fx.size = v; touch(false); }));
+  if (uses.includes('density')) g.append(studioSlider('How many', fx.density ?? 5, 1, 10, v => { fx.density = v; touch(false); }));
+  if (uses.includes('fade')) g.append(studioSlider('Fade time', fx.fade ?? 5, 1, 10, v => { fx.fade = v; touch(false); }));
+  if (uses.includes('reverse')) {
+    const rev = el('input', { type: 'checkbox', className: 'switch', id: 'stRev', checked: !!fx.reverse, onchange: e => { fx.reverse = e.target.checked; touch(false); } });
+    g.append(el('div', { className: 'st-field' }, el('span', { textContent: 'Spin' }), el('div', { className: 'row' }, rev, el('label', { htmlFor: 'stRev', textContent: 'The other way' }))));
+  }
+  const blend = el('select', { ariaLabel: 'Over the layers below', onchange: e => { l.blend = e.target.value; touch(true); } });
+  BLENDS.forEach(([v, t]) => blend.append(new Option(t, v, false, v === (l.blend || 'normal'))));
+  g.append(el('label', { className: 'st-field' }, el('span', { textContent: 'Blend' }), blend));
+  g.append(studioSlider('Opacity', l.opacity ?? 100, 0, 100, v => { l.opacity = v; touch(false); }, v => v + '%'));
+
+  const notes = {
+    reactive: dev.kind === 'mouse' ? 'Lights up on each click.' : 'Lights the key you press. Keys of other keyboards don’t count.',
+    ripple: dev.kind === 'mouse' ? 'A flash on each click.' : 'A ring spreads from the key you press.',
+    audio: 'Follows what the PC is playing. Nothing is recorded: it reads Windows’ volume meter.',
+    screen: 'Follows the screen. Games in exclusive full screen may show black; borderless windowed works.',
+    battery: 'Shows the battery of this device, read once a minute.',
+  };
+  if (fx.kind === 'battery' && dev.battery == null)
+    g.append(el('p', { className: 'note st-warn', role: 'status', textContent: devLabel(dev) + ' reports no battery (it is wired), so this layer stays dark. Pick another effect with Change, or use it on a wireless device.' }));
+  else if (notes[fx.kind]) g.append(el('p', { className: 'note', textContent: notes[fx.kind] }));
+  return g;
+}
+
+async function studioEverywhere() {
+  const others = devices.filter(d => d !== dev && d.lighting_control && (d.leds.length || d.matrix));
+  const plain = { layers: studio.scene.layers.map(l => ({ ...structuredClone(l), target: l.target && l.target.type === 'zones' ? l.target : { type: 'all' } })) };
+  let failed = 0;
+  for (const d of others) {
+    try {
+      const own = { layers: plain.layers.map(l => l.target.type === 'zones' && !l.target.list.some(z => d.leds.some(x => x.name === z)) ? { ...l, target: { type: 'all' } } : l) };
+      await api('/api/studio', { id: d.id, data: own });
+      d.profile.studio = own;
+    } catch { failed++; }
+  }
+  toast(failed ? `${failed} of ${others.length} devices didn’t take it` : 'On every device · saved to each one’s live profile', failed > 0);
+}
+
+// ---------- The RGB Studio page: every device's layered lighting, with a guide ----------
+
+const studioDevices = () => devices.filter(d => d.lighting_control && (d.leds.length || d.matrix));
+function openStudio(d) {
+  if (d) dev = d;
+  showStudio = true; showAll = false; showSettings = false; sel = null;
+  render();
+}
+const STUDIO_TIPS = [
+  ['Start from a scene', 'Pick one on the right, or press Add layer for a single effect.'],
+  ['Stack layers', 'The top layer covers the ones below. Blend “Lit parts only” puts sparks or ripples over a background.'],
+  ['Pick the lights', 'Click or drag across the drawing to put a layer on some keys or zones only.'],
+  ['It runs from your PC', 'Live while Secretarybird runs. Closed, each device shows its own zone colors.'],
+];
+function renderStudioPage() {
+  const page = $('studioPage'), list = studioDevices();
+  if (!list.length) {
+    stopStudio();
+    page.innerHTML = '';
+    page.append(el('div', { className: 'sp-none' }, el('h2', { textContent: 'RGB Studio' }),
+      el('p', { className: 'note', textContent: 'No device has lighting control on. Turn it on under a device’s Lighting → Control lighting, then come back.' })));
+    return;
+  }
+  if (!dev || !list.some(d => d.id === dev.id)) dev = list[0];
+  // A refresh of the device list keeps the open editor (and a drag in progress) as it is.
+  if (studio && studio.devId === dev.id && page.contains(studio.box)) return studioHead();
+  stopStudio();
+  page.innerHTML = '';
+  const box = el('div', { className: 'edbox' });
+  page.append(el('header', { className: 'sp-head', id: 'spHead' }), studioGuide(), studioCost(), box);
+  studioHead();
+  studioEditor(box);
+}
+function studioHead() {
+  const h = $('spHead'); if (!h) return;
+  h.innerHTML = '';
+  const pick = el('div', { className: 'sp-devs', role: 'group', ariaLabel: 'Device' });
+  studioDevices().forEach(d => {
+    const on = studioOn(d.profile || {});
+    pick.append(el('button', { className: 'pill', ariaPressed: d.id === dev.id, title: on ? 'Studio is on: ' + studioSummary(d.profile) : 'Studio is off: zone colors',
+      onclick: () => { if (d.id === dev.id) return; dev = d; stopStudio(); render(); } },
+      el('i', { className: 'sp-dot' + (on ? ' on' : '') }), devLabel(d)));
+  });
+  h.append(el('h2', { textContent: 'RGB Studio' }), pick,
+    el('p', { className: 'sp-saved' }, 'Saved to ', el('b', { textContent: dev.active }), ' · ',
+      el('button', { className: 'link', textContent: 'Other settings of ' + devLabel(dev), onclick: () => openDevice(dev) })));
+  if (!$('studioPage').querySelector('.sp-guide'))
+    h.append(el('button', { className: 'link sp-tipsback', textContent: 'How it works', onclick: showStudioGuide }));
+}
+function studioGuide() {
+  if (remembered('studio-guide') === 'closed') return '';
+  const g = el('section', { className: 'sp-guide', ariaLabel: 'How RGB Studio works' });
+  const steps = el('ol', { className: 'sp-steps' });
+  STUDIO_TIPS.forEach(([t, d]) => steps.append(el('li', {}, el('b', { textContent: t }), el('span', { textContent: d }))));
+  g.append(steps, el('button', { className: 'ghost', textContent: 'Got it', onclick: () => { remember('studio-guide', 'closed'); g.remove(); studioHead(); } }));
+  return g;
+}
+function showStudioGuide() {
+  remember('studio-guide', 'open');
+  const head = $('spHead');
+  if (head && !$('studioPage').querySelector('.sp-guide')) head.after(studioGuide());
+  studioHead();
+}
+// What it costs, as measured, so nobody has to guess (16-core test PC, 2026-11-15).
+function studioCost() {
+  return el('details', { className: 'sp-cost' },
+    el('summary', {}, el('b', { textContent: 'Runs on your PC: ' }),
+      'about 0% CPU while streaming, 0.75% with Audio meter or Screen color, 10 to 25 MB of memory (our 16-core test PC). ',
+      el('span', { className: 'sp-more', textContent: 'More' })),
+    el('p', { textContent: 'Studio draws every frame here and sends it over USB 30 times a second. This page’s live view adds work in your browser, so close it while you play. Wireless devices get 10 frames a second, and their battery still runs down faster than with their own effects. Close Synapse while Studio runs: it fights over the lights.' }));
 }
 
 function keysEditor(box) {
@@ -1892,6 +2990,87 @@ function gamingEditor(box) {
   box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Keys blocked so a game isn’t left by accident' }), ...rows),
     el('p', { className: 'note', textContent: 'Saved to this profile: tie the profile to a game (Profile → Switches with) and gaming mode comes on while you play.' }),
     el('p', { className: 'note', textContent: 'New and not yet confirmed on a keyboard. If a blocked key still works, please tell us.' }));
+}
+
+// Scroll wheel (HyperScroll mice): the wheel mode, the modes the wheel-mode button skips,
+// and scroll acceleration and Smart-Reel, each off or at a level 0-4 (low 0, medium 2, high 4).
+const SCROLL_MODES = [['tactile', 'Tactile', 'Notched steps'], ['free-spin', 'Free-spin', 'Spins freely'],
+  ['precision-tactile', 'Precision tactile', 'Finer notched steps']];
+const ASSIST_NAMES = { low: 0, medium: 2, high: 4 };
+const assistLevel = a => a == null || a === 'off' ? null : a in ASSIST_NAMES ? ASSIST_NAMES[a] : +a;
+const assistText = a => a == null || a === 'off' ? 'off' : a in ASSIST_NAMES ? a : 'level ' + a;
+function scrollOf(name) {
+  if (name === dev.active && dev.scroll) return dev.scroll;
+  const w = prof(name).scroll || {};
+  return Object.keys(w).length ? w : null;
+}
+function scrollText(w) {
+  const mode = (SCROLL_MODES.find(m => m[0] === w.mode) || [, 'As the mouse has it'])[1];
+  const extra = [w.acceleration && w.acceleration !== 'off' && 'acceleration ' + assistText(w.acceleration),
+    w.smart_reel && w.smart_reel !== 'off' && 'Smart-Reel ' + assistText(w.smart_reel)].filter(Boolean);
+  return [mode, ...extra].join(' · ');
+}
+async function scrollSend(body, done) {
+  try {
+    const r = await api('/api/scroll', body);
+    dev.scroll = r.scroll;
+    dev.profile.scroll = Object.assign({}, dev.profile.scroll,
+      { mode: r.scroll.mode, acceleration: r.scroll.acceleration, smart_reel: r.scroll.smart_reel },
+      r.scroll.precision ? { disabled: r.scroll.disabled } : {});
+    refreshCell('scroll');
+    toast(done + ' · saved to ' + dev.active);
+  } catch (err) { toast(err.message, true); }
+}
+function scrollEditor(box) {
+  const w = dev.scroll;
+  const modes = SCROLL_MODES.filter(m => w.precision || m[0] !== 'precision-tactile');
+  const grid = el('div', { className: 'dimgrid', role: 'group', ariaLabel: 'Scroll wheel mode' });
+  const skips = el('div', { className: 'edgroup' });
+  const draw = () => {
+    [...grid.children].forEach(t => t.setAttribute('aria-pressed', t.dataset.v === dev.scroll.mode));
+    skips.querySelectorAll('input').forEach(i => {
+      const off = dev.scroll.disabled.includes(i.dataset.v);
+      i.checked = off;
+      // The mode in use can't be skipped, and one mode always stays in the cycle.
+      i.disabled = i.dataset.v === dev.scroll.mode || (!off && dev.scroll.disabled.length >= modes.length - 1);
+    });
+  };
+  modes.forEach(([v, text, sub]) => grid.append(el('button', { className: 'tile', dataset: { v }, onclick: async e => {
+    const t = e.currentTarget; t.disabled = true;
+    await scrollSend({ scroll_mode: v }, 'Wheel: ' + text.toLowerCase());
+    draw(); t.disabled = false;
+  } }, el('div', {}, el('span', { className: 'tv', textContent: text }), el('span', { className: 'tl', textContent: sub })))));
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: 'Wheel mode' }), grid));
+  if (w.precision) {
+    skips.append(el('h3', { textContent: 'Skipped by the wheel-mode button' }), ...modes.map(([v, text]) => {
+      const input = el('input', { type: 'checkbox', className: 'switch', id: 'sk-' + v, dataset: { v }, onchange: async e => {
+        const t = e.target;
+        const want = modes.map(m => m[0]).filter(m => m === v ? t.checked : dev.scroll.disabled.includes(m));
+        const names = modes.filter(m => want.includes(m[0])).map(m => m[1].toLowerCase());
+        await scrollSend({ scroll_disabled: want.join(',') || 'none' }, names.length ? 'Skips ' + names.join(', ') : 'Cycles through every mode');
+        draw();
+      } });
+      return el('div', { className: 'row' }, input, el('label', { htmlFor: 'sk-' + v, textContent: 'Skip ' + text.toLowerCase() }));
+    }));
+    box.append(skips);
+  }
+  const assist = (field, title, note) => {
+    const level = assistLevel(dev.scroll[field]);
+    const on = el('input', { type: 'checkbox', className: 'switch', id: 'as-' + field, checked: level != null });
+    const range = el('input', { type: 'range', min: 0, max: 4, step: 1, value: level ?? 2, disabled: level == null, ariaLabel: title + ' level' });
+    const named = v => Object.keys(ASSIST_NAMES).find(k => ASSIST_NAMES[k] === +v) || v;
+    const send = () => scrollSend({ [field]: on.checked ? range.value : 'off' }, title + ' ' + (on.checked ? assistText(named(range.value)) : 'off'));
+    on.onchange = () => { range.disabled = !on.checked; send(); };
+    range.onchange = send;
+    range.style.flex = '1';
+    const scale = el('div', { className: 'row' }, el('span', { className: 'tl', textContent: 'Low' }), range, el('span', { className: 'tl', textContent: 'High' }));
+    scale.style.flexWrap = 'nowrap';
+    box.append(el('div', { className: 'edgroup' }, el('div', { className: 'row' }, on, el('label', { htmlFor: on.id, textContent: title })), scale,
+      el('p', { className: 'note', textContent: note })));
+  };
+  assist('acceleration', 'Scroll acceleration', 'Scrolls further the faster you spin, in free-spin.');
+  assist('smart_reel', 'Smart-Reel', 'Free-spin while you flick the wheel, notched again when it stops. The level sets how fast a flick has to be.');
+  draw();
 }
 
 // Asks Razer's public product page whether newer firmware is out. Never installs anything.
@@ -2618,7 +3797,7 @@ $('theme').onchange = e => {
   setTheme(e.target.value);
   try { if (e.target.value) localStorage.setItem(themeKey, e.target.value); else localStorage.removeItem(themeKey); } catch (err) { }
 };
-$('home').onclick = () => { if (devices.length || unsupported.length) { showAll = true; showSettings = false; sel = null; render(); } };
+$('home').onclick = () => { if (devices.length || unsupported.length) { showAll = true; showStudio = false; showSettings = false; sel = null; render(); } };
 $('gear').innerHTML = icon('gear');
 $('gear').onclick = () => { showSettings = !showSettings; sel = null; render(); };
 const topColor = () => ({ color: $('syncColor').value.slice(1).toUpperCase() });

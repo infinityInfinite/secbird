@@ -42,6 +42,9 @@ Things Secretarybird does that Synapse won't:
 
 - **Run on Linux.** The command line works on any x86_64 distribution.
 - **Compare profiles.** Every profile of a device side by side on one screen.
+- **Every effect on every device.** Studio draws the lighting itself, so a mouse whose firmware
+  only knows spectrum and wave still gets breathing, starlight, fire, ripple, an audio meter or
+  the screen's colors, in layers.
 - **Script it.** The [`secbird` command line](#command-line) does what the editor does: DPI,
   lighting, remaps, macros, profiles.
 - **Plain files.** Your settings are one `profiles.json`; back it up or copy it to another PC.
@@ -115,6 +118,11 @@ one at a time. Bug reports from Linux are very welcome, with `secbird report` ou
 - **Lighting:** colors and brightness per zone, per-key painting on per-key keyboards, and the
   effects the device runs itself (spectrum, wave, breathing, reactive, starlight; each device
   only has some of them). Verified on the Basilisk V3 (spectrum, wave).
+- **Studio:** **Lighting → Studio** stacks effects in layers, each on all lights, some zones or
+  the keys you pick: static, gradient, breathing, spectrum, wave, wheel, blink, reactive,
+  ripple, starlight, fire, rain, audio meter, screen color and battery, with your colors,
+  speed, direction, blend and opacity. The drawing shows the device live. Secretarybird draws
+  the frames, so it runs while the tray runs; closed, the device shows its zone colors.
 - **Leave RGB to another app:** open a device's **Lighting → Control lighting** tile and
   turn off **Secretarybird controls lighting** (CLI: `secbird -d SERIAL lighting off`).
   It leaves the lights as they are, not off: no colors, effects, brightness or per-key writes,
@@ -181,6 +189,8 @@ secbird button side-back macro:1
 secbird color logo FF8800       static color for a zone
 secbird effect logo spectrum    built-in effect: spectrum, wave, breathing, reactive, starlight
 secbird keys 00FFAA             every key one color (per-key keyboards)
+secbird studio add wave         Studio layer: any effect, e.g. `studio add ripple:FFFFFF blend=lit`
+secbird studio play 15          show the Studio layers for 15 s without the tray
 secbird firmware                is newer firmware out? (links to Razer's updater)
 secbird update                  is a newer Secretarybird out?
 secbird sync 00FFAA             same color on every device
@@ -285,6 +295,13 @@ To try the editor without hardware, start the tray with simulated devices:
 $env:SECBIRD_SIM="all"   # or a list, e.g. "naga,blackwidow,blade,firefly,dock"
 .\target\release\secbird-tray.exe
 ```
+
+## Contributing
+
+Pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains what Secretarybird
+stands for (visible and safe, easy, light, new devices are easy to add, checkable), how the code
+is laid out, how to add a device or a feature, and the checklists every pull request goes
+through.
 
 ## Legal
 

@@ -25,6 +25,25 @@ fn check_lighting(dev: &Device, store: &mut Store) -> Result<()> {
     Ok(())
 }
 
+/// One headset setting: send it, let the headset confirm it, then record it in the active
+/// profile. When the headset already reports the same values nothing is written; the
+/// confirmed values are returned, so callers don't need another read to show them.
+/// A microphone preset carries its own bands, so those are read back and saved too.
+pub fn set_audio(dev: &Device, store: &mut Store, name: &str, values: Vec<i16>) -> Result<Vec<i16>> {
+    if dev.audio_read(name).ok() == Some(values.clone()) {
+        store.for_device(dev).active_mut().audio.insert(name.into(), values.clone());
+        store.save()?;
+        return Ok(values);
+    }
+    dev.audio_set(name, &values)?;
+    if name == "mic-preset" {
+        let bands = dev.audio_read("mic-eq")?;
+        store.for_device(dev).active_mut().audio.insert("mic-eq".into(), bands);
+    }
+    store.for_device(dev).active_mut().audio.insert(name.into(), values.clone());
+    store.save()?;
+    Ok(values)
+}
 /// Returns the DPI actually set, after rounding to the device's step.
 pub fn set_dpi(dev: &Device, store: &mut Store, x: u16, y: u16) -> Result<(u16, u16)> {
     let applied = dev.set_dpi(x, y)?;
@@ -62,6 +81,35 @@ pub fn set_game_mode(dev: &Device, store: &mut Store, mode: crate::GameMode) -> 
     store.save()
 }
 
+pub fn set_scroll_mode(dev: &Device, store: &mut Store, mode: crate::ScrollMode) -> Result<()> {
+    dev.set_scroll_mode(mode)?;
+    let scroll = &mut store.for_device(dev).active_mut().scroll;
+    scroll.mode = Some(mode);
+    // Switching to a skipped mode put it back in the cycle.
+    if let Some(disabled) = &mut scroll.disabled {
+        disabled.retain(|m| *m != mode);
+    }
+    store.save()
+}
+
+pub fn set_scroll_disabled(dev: &Device, store: &mut Store, disabled: Vec<crate::ScrollMode>) -> Result<()> {
+    dev.set_scroll_disabled(&disabled)?;
+    store.for_device(dev).active_mut().scroll.disabled = Some(disabled);
+    store.save()
+}
+
+pub fn set_scroll_acceleration(dev: &Device, store: &mut Store, a: crate::Assist) -> Result<()> {
+    dev.set_scroll_acceleration(a)?;
+    store.for_device(dev).active_mut().scroll.acceleration = Some(a);
+    store.save()
+}
+
+pub fn set_smart_reel(dev: &Device, store: &mut Store, a: crate::Assist) -> Result<()> {
+    dev.set_smart_reel(a)?;
+    store.for_device(dev).active_mut().scroll.smart_reel = Some(a);
+    store.save()
+}
+
 pub fn set_auto_sleep(dev: &Device, store: &mut Store, enabled: bool) -> Result<()> {
     dev.set_auto_sleep(enabled)?;
     store.for_device(dev).active_mut().auto_sleep = Some(enabled);
@@ -76,7 +124,9 @@ pub fn set_polling(dev: &Device, store: &mut Store, hz: u32) -> Result<()> {
 
 pub fn set_color(dev: &Device, store: &mut Store, zone_name: &str, color: Rgb) -> Result<()> {
     check_lighting(dev, store)?;
-    dev.set_static_color(dev.led_id(zone_name)?, color)?;
+    let led = dev.led_id(zone_name)?;
+    dev.set_static_color(led, color)?;
+    light_up_if_dark(dev, store, zone_name, led);
     store.for_device(dev).active_mut().keys.clear();
     let z = zone(store, dev, zone_name);
     z.color = Some(color);
@@ -88,12 +138,26 @@ pub fn set_color(dev: &Device, store: &mut Store, zone_name: &str, color: Rgb) -
 /// A built-in effect on one zone. Like a color, it replaces per-key colors.
 pub fn set_effect(dev: &Device, store: &mut Store, zone_name: &str, effect: crate::effects::Effect) -> Result<()> {
     check_lighting(dev, store)?;
-    dev.set_effect(dev.led_id(zone_name)?, &effect)?;
+    let led = dev.led_id(zone_name)?;
+    dev.set_effect(led, &effect)?;
+    light_up_if_dark(dev, store, zone_name, led);
     store.for_device(dev).active_mut().keys.clear();
     let z = zone(store, dev, zone_name);
     z.effect = Some(effect);
     z.off = false;
     store.save()
+}
+
+/// A zone with no saved brightness may still be at 0 on the device (left there by Synapse),
+/// so a new colour shows nothing while the editor says 100 % (#30). Then set and save 100 %.
+/// Zones whose brightness the user chose are left alone, and a failed read changes nothing.
+fn light_up_if_dark(dev: &Device, store: &mut Store, zone_name: &str, led: u8) {
+    if zone(store, dev, zone_name).brightness.is_some() || dev.brightness(led).map_or(true, |pct| pct > 0) {
+        return;
+    }
+    if dev.set_brightness(led, 100).is_ok() {
+        zone(store, dev, zone_name).brightness = Some(100);
+    }
 }
 
 /// Brightness in percent, clamped to 0-100.

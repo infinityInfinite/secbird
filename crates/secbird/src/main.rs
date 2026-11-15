@@ -33,6 +33,15 @@ SETTINGS (saved to the active profile):
   gaming [off|win,alt-tab,alt-f4]
                             Keyboards: gaming mode, the keys it blocks (any of win,
                             alt-tab and alt-f4). Untested on hardware yet
+  scroll                    Mice with a HyperScroll wheel: wheel mode, acceleration,
+                            Smart-Reel
+  scroll mode <tactile|free-spin|precision-tactile>
+  scroll acceleration <off|low|medium|high|0-4>
+                            Faster scrolling in free-spin
+  scroll smart-reel <off|low|medium|high|0-4>
+                            Free-spin while the wheel is flicked, notched again when it stops
+  scroll disable <none|MODE[,MODE]>
+                            Modes the wheel-mode button skips (at most two)
   color <zone> <RRGGBB>     Static color for a lighting zone (name or id)
   brightness <zone> <0-100> Brightness for a lighting zone
   off <zone>                Turn a lighting zone off
@@ -41,6 +50,25 @@ SETTINGS (saved to the active profile):
                             starlight:RRGGBB[,RRGGBB]|random[@1-3]
   keys <RRGGBB>             Every key one color (keyboards with per-key lighting)
   sync <RRGGBB>             Same color everywhere (skips devices with lighting control off)
+  audio [SETTING [VALUES...]]
+                            Headset hardware: no arguments lists every setting, one
+                            reads it, more set it (e.g. `audio anc 1 3`)
+
+
+STUDIO (layered lighting drawn on the PC; runs while the tray runs, any device, any effect):
+  studio [list]             The active profile's layers, bottom first
+  studio add <layer>        Add a layer on top, e.g. `studio add ripple:FFFFFF blend=lit`
+  studio set <n> <layer>    Replace layer n
+  studio remove <n>         Delete layer n
+  studio move <n> <m>       Move layer n to place m
+  studio on|off <n>         Turn one layer on or off
+  studio clear              No layers: the device shows its zone colors again
+  studio play [seconds]     Show the layers here, without the tray (default 15 s)
+  Layer: <effect>[:RRGGBB,...] then any of speed=1-10 angle=0-359 size=1-10 density=1-10
+         fade=1-10 reverse blend=normal|lit|add|multiply|max|mask opacity=0-100
+         zones=logo,underglow keys=<cell>,<cell> mode=meter|pulse|stereo name=<text>
+  Effects: static gradient breathing spectrum wave wheel blink reactive ripple starlight
+           fire rain audio screen battery (no colors = rainbow or random)
 
 BUTTONS (mice with on-board button memory; add --hypershift for the HyperShift layer):
   button [list]             Buttons and what they do now
@@ -220,6 +248,9 @@ Download: {}", r.version, secbird_core::update::CURRENT, r.url),
         }
         for pid in secbird_core::device::unanswered(&api, &devices).into_iter().filter(|p| selects(*p, "", "")) {
             match db.get(pid) {
+                Some(spec) if secbird_core::headset::is_headset(pid) => {
+                    println!("{pid:04X}  {}  (connected but not answering. Is it switched on? Is Synapse running?)", spec.name)
+                }
                 Some(spec) if spec.lighting == secbird_core::Lighting::Kraken => {
                     println!("{pid:04X}  {}  (connected; its headset protocol isn't supported yet)", spec.name)
                 }
@@ -319,6 +350,34 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
             println!("Lighting control: {}", if store.for_device(dev).lighting_off { "off (RGB left untouched)" } else { "on" });
             Ok(())
         }
+        // Headset hardware settings: no arguments lists them, one reads, more set.
+        "audio" => match rest {
+            [] => {
+                if !secbird_core::headset::is_headset(dev.pid) {
+                    return Err(Error::Unsupported(format!("{} has no headset settings", dev.name())));
+                }
+                for &(key, label, _) in secbird_core::headset::SETTINGS {
+                    match dev.audio_read(key) {
+                        Ok(values) => println!("  {key:<12} {}", values.iter().map(i16::to_string).collect::<Vec<_>>().join(" ")),
+                        Err(e) => println!("  {key:<12} {e}  ({label})"),
+                    }
+                }
+                Ok(())
+            }
+            [name] => {
+                println!("{}", dev.audio_read(name)?.iter().map(i16::to_string).collect::<Vec<_>>().join(" "));
+                Ok(())
+            }
+            [name, values @ ..] => {
+                let values: Vec<i16> = values
+                    .iter()
+                    .map(|v| v.parse().map_err(|_| Error::InvalidArg(format!("'{v}' is not a number"))))
+                    .collect::<Result<_, _>>()?;
+                let confirmed = actions::set_audio(dev, &mut store, name, values)?;
+                println!("Set {name}; the headset now reports {}", confirmed.iter().map(i16::to_string).collect::<Vec<_>>().join(" "));
+                Ok(())
+            }
+        },
         "battery" => match dev.battery()? {
             None => {
                 println!("Wired device, no battery.");
@@ -421,6 +480,7 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
                 Ok(())
             }
         },
+        "scroll" => scroll_cmd(dev, &mut store, rest),
         "macro" => macro_cmd(dev, &mut store, rest),
         "poll" => match rest.first() {
             None => {
@@ -466,9 +526,104 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
         }
         "button" => button_cmd(dev, &mut store, rest),
         "key" => key_cmd(dev, &mut store, rest),
+        "studio" => studio_cmd(dev, &mut store, rest),
         "profile" => profile_cmd(dev, &mut store, rest),
         other => Err(Error::InvalidArg(format!("unknown command '{other}' (try --help)"))),
     }
+}
+
+fn studio_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
+    use secbird_core::studio::{render, Canvas, Inputs, Layer, Scene};
+    let sub = rest.first().map(String::as_str).unwrap_or("list");
+    let index = |i: usize, n: usize| -> Result<usize, Error> {
+        let v: usize = rest.get(i).and_then(|v| v.parse().ok()).ok_or_else(|| Error::InvalidArg("which layer? (a number, see `studio list`)".into()))?;
+        if v == 0 || v > n {
+            return Err(Error::InvalidArg(format!("there is no layer {v} (1-{n})")));
+        }
+        Ok(v - 1)
+    };
+    let profiles = store.for_device(dev);
+    let profile_name = profiles.active.clone();
+    let mut scene = profiles.active().studio.clone().unwrap_or_default();
+    let n = scene.layers.len();
+    match sub {
+        "list" => {
+            if scene.layers.is_empty() {
+                println!("{profile_name}: no layers (zone colors are shown)");
+            }
+            for (i, l) in scene.layers.iter().enumerate() {
+                println!("{:2}  {l}", i + 1);
+            }
+            return Ok(());
+        }
+        "play" => {
+            let secs: f32 = rest.get(1).map(|s| s.parse().map_err(|_| Error::InvalidArg(format!("bad seconds '{s}'")))).transpose()?.unwrap_or(15.0);
+            if !scene.is_on() {
+                return Err(Error::InvalidArg("no layers to play (studio add ...)".into()));
+            }
+            let canvas = Canvas::for_device(dev, &store.for_device(dev).layout);
+            let start = std::time::Instant::now();
+            let input = Inputs::default();
+            let mut last: Option<Vec<Rgb>> = None;
+            let (mut frames, mut failed) = (0u32, 0u32);
+            println!("Playing {} layers on {} for {secs} s (key presses, sound and screen need the tray)", n, dev.name());
+            while start.elapsed().as_secs_f32() < secs {
+                let frame = render(&scene, &canvas, start.elapsed().as_secs_f32(), &input);
+                let r = match &last {
+                    None => dev.start_stream(&canvas, &frame),
+                    Some(l) => dev.stream(&canvas, &frame, Some(l)),
+                };
+                match r {
+                    Ok(()) => last = Some(frame),
+                    Err(e) => {
+                        failed += 1;
+                        if last.is_none() {
+                            return Err(e);
+                        }
+                    }
+                }
+                frames += 1;
+                // Keep the pace whatever the USB writes took: the next frame is due at a fixed time.
+                let next = std::time::Duration::from_secs_f32(frames as f32 / secbird_core::studio::FPS as f32);
+                if let Some(wait) = next.checked_sub(start.elapsed()) {
+                    std::thread::sleep(wait);
+                }
+            }
+            println!("{frames} frames, {failed} failed. Putting the lighting back.");
+            dev.show_saved_lighting();
+            let profiles = store.for_device(dev);
+            return report_apply(profiles.apply(&profiles.active, dev));
+        }
+        "add" => scene.layers.push(Layer::parse(&rest[1..])?),
+        "set" => {
+            let i = index(1, n)?;
+            scene.layers[i] = Layer::parse(&rest[2..])?;
+        }
+        "remove" => {
+            let i = index(1, n)?;
+            scene.layers.remove(i);
+        }
+        "move" => {
+            let (from, to) = (index(1, n)?, index(2, n)?);
+            let l = scene.layers.remove(from);
+            scene.layers.insert(to, l);
+        }
+        "on" | "off" => {
+            let i = index(1, n)?;
+            scene.layers[i].enabled = sub == "on";
+        }
+        "clear" => scene = Scene::default(),
+        other => return Err(Error::InvalidArg(format!("unknown studio command '{other}' (try --help)"))),
+    }
+    scene.check()?;
+    let profiles = store.for_device(dev);
+    profiles.active_mut().studio = (!scene.layers.is_empty()).then(|| scene.clone());
+    store.save()?;
+    for (i, l) in scene.layers.iter().enumerate() {
+        println!("{:2}  {l}", i + 1);
+    }
+    println!("Saved to {profile_name}. The tray shows it within a second{}.", if scene.layers.is_empty() { " (zone colors are back)" } else { "" });
+    Ok(())
 }
 
 fn profile_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
@@ -513,6 +668,19 @@ fn profile_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), E
             }
             if let Some(g) = &p.game_mode {
                 println!("  gaming     {g}");
+            }
+            let w = &p.scroll;
+            if let Some(m) = w.mode {
+                println!("  scroll     {m}");
+            }
+            if let Some(d) = &w.disabled {
+                println!("  skipped    {}", secbird_core::scroll::modes_text(d));
+            }
+            if let Some(a) = w.acceleration {
+                println!("  accel      {a}");
+            }
+            if let Some(a) = w.smart_reel {
+                println!("  smart-reel {a}");
             }
             for (zone, z) in &p.lighting {
                 let state = match (z.off, z.color) {
@@ -774,7 +942,7 @@ fn dock_test(devices: &[Device], what: Option<&str>) -> Result<(), Error> {
 
 fn report_apply(results: Vec<secbird_core::profile::Applied>) -> Result<(), Error> {
     if results.is_empty() {
-        println!("Nothing to apply: the profile has no recorded settings yet.");
+        println!("Nothing to send: the profile is empty or the device already matches it.");
     }
     let mut failed = 0;
     for r in &results {
@@ -813,7 +981,62 @@ fn game_mode_text(g: secbird_core::GameMode) -> String {
     format!("on, blocks {}", keys.join(", "))
 }
 
+fn scroll_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
+    let args: Vec<&str> = rest.iter().map(String::as_str).collect();
+    // What was just sent, shown over the read-back (the wheel takes a moment to switch).
+    let mut sent = secbird_core::ScrollSettings::default();
+    match args.as_slice() {
+        [] => {}
+        ["mode", m] => {
+            let m = m.parse()?;
+            actions::set_scroll_mode(dev, store, m)?;
+            sent.mode = Some(m);
+        }
+        ["acceleration", a] => {
+            let a = a.parse()?;
+            actions::set_scroll_acceleration(dev, store, a)?;
+            sent.acceleration = Some(a);
+        }
+        ["smart-reel", a] => {
+            let a = a.parse()?;
+            actions::set_smart_reel(dev, store, a)?;
+            sent.smart_reel = Some(a);
+        }
+        ["disable", modes] => {
+            let modes = secbird_core::scroll::parse_modes(modes)?;
+            actions::set_scroll_disabled(dev, store, modes.clone())?;
+            sent.disabled = Some(modes);
+        }
+        _ => return Err(Error::InvalidArg("see `secbird --help` for scroll".into())),
+    }
+    match dev.scroll_wheel()? {
+        None => println!("{} has no scroll wheel settings.", dev.name()),
+        Some(w) => print_scroll_wheel(&sent.overlay(w)),
+    }
+    Ok(())
+}
+
+fn print_scroll_wheel(w: &secbird_core::ScrollWheel) {
+    println!("Scroll mode   {}", w.mode);
+    if w.precision {
+        println!("Skipped       {}", secbird_core::scroll::modes_text(&w.disabled));
+    }
+    println!("Acceleration  {}", w.acceleration);
+    println!("Smart-Reel    {}", w.smart_reel);
+}
+
 fn info(dev: &Device, store: &mut Store) -> Result<(), Error> {
+    if secbird_core::headset::is_headset(dev.pid) {
+        println!("Device    {} ({:04X})", dev.name(), dev.pid);
+        println!("Battery   {}%{}", dev.battery()?.unwrap_or(0), if dev.charging()? { " (charging)" } else { "" });
+        for &(key, label, _) in secbird_core::headset::SETTINGS {
+            match dev.audio_read(key) {
+                Ok(values) => println!("  {key:<12} {}  ({label})", values.iter().map(i16::to_string).collect::<Vec<_>>().join(" ")),
+                Err(e) => println!("  {key:<12} {e}  ({label})"),
+            }
+        }
+        return Ok(());
+    }
     let (major, minor) = dev.firmware()?;
     println!("Device    {} ({:04X})", dev.name(), dev.pid);
     println!("Serial    {}", dev.serial()?);
@@ -843,6 +1066,13 @@ fn info(dev: &Device, store: &mut Store) -> Result<(), Error> {
     }
     if let Ok(Some(g)) = dev.game_mode() {
         println!("Gaming    {}", game_mode_text(g));
+    }
+    if let Ok(Some(w)) = dev.scroll_wheel() {
+        let skipped = match w.disabled.is_empty() {
+            true => String::new(),
+            false => format!(", skips {}", secbird_core::scroll::modes_text(&w.disabled)),
+        };
+        println!("Scroll    {}{skipped}; acceleration {}, Smart-Reel {}", w.mode, w.acceleration, w.smart_reel);
     }
     if let Some(spec) = &dev.spec {
         if !spec.leds.is_empty() {

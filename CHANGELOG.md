@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.6.0] - 2026-11-15
+
+### Added
+- **BlackShark V3 Pro headset** (wired 0576, wireless 0577), thanks to Monratis (#18): battery
+  and charging, ANC and ambient sound, six speaker EQ slots, microphone EQ and presets,
+  sidetone and auto-off, saved in profiles like everything else. The plain BlackShark V3
+  (0579, 057A, #15) speaks the same protocol on paper but hasn't been tried; it shows as not
+  answering if it doesn't.
+- **RGB Studio: lighting in layers, drawn by Secretarybird.** Open the **RGB Studio** tab.
+  Stack layers, each one an effect on all lights, some zones or the keys you pick, and blend
+  them (cover, lit parts only, add, brighter, multiply, only where lit below) with their own
+  opacity. 15 effects: static, gradient, breathing, spectrum, wave (any angle), wheel, blink,
+  reactive and ripple (on the key you press, or each click on a mouse), starlight, fire, rain,
+  audio meter (follows what the PC plays), screen color (follows the screen) and battery. Every
+  effect takes your colors or runs as a rainbow, with speed, size, density and fade where they
+  apply. The drawing shows what the device shows, live. Presets to start from, and "Use on every
+  device".
+  - The tray draws the frames (30 a second; 10 for wireless devices, to save battery), so every
+    device runs every effect, including the ones its firmware can't run by itself (the
+    Basilisk V3 runs only static, spectrum and wave on its own).
+  - It needs the tray running, as Synapse needs its service. With Secretarybird closed the
+    device shows its zone colors and effects again, which are still set the usual way.
+  - Mice, mousepads and docks get one color per zone; keyboards and keypads get every key.
+  - Audio reads Windows' volume meter of the default output; nothing is recorded. Screen color
+    reads the screen scaled down to 32 x 18; games in exclusive full screen may show black.
+  - Key presses are read only while a layer uses Reactive or Ripple, and only from Razer
+    devices.
+  - Command line: `secbird studio add|set|remove|move|on|off|clear|list`, and
+    `secbird studio play` to show the layers without the tray (Linux too).
+- Breathing and Starlight can use two colours in the editor, not only one or random (#81,
+  thanks Kosminaut13). The second colour has its own picker next to the effect.
+- Tartarus Pro: its profile light is a zone ("profile", LED 0x0B), from a Synapse capture and a
+  test on Linux (#60, thanks DAVEfromCZE).
+- Scroll wheel settings on mice with a HyperScroll wheel: the wheel mode (tactile, free-spin,
+  precision tactile), which modes the wheel-mode button skips, scroll acceleration and Smart-Reel,
+  each off or at a level 0-4 like Synapse's sliders (the new Scroll wheel section, or
+  `secbird scroll mode free-spin`, `secbird scroll smart-reel medium`). Saved per profile. Read
+  and level ranges checked on a Naga V3 Pro on a Mouse Dock Pro (thanks steeben, #62). The
+  wheel-mode button can now skip a mode, or stop skipping one Synapse turned off (#73).
+
+### Fixed
+- A colour or effect on a zone that Synapse left at 0 % brightness now shows. Secretarybird
+  sets that zone to 100 % and saves it, unless you chose a brightness for it yourself. Before,
+  the editor said 100 % while the light stayed dark until the slider was moved (#30, thanks
+  arden21).
+- Tartarus Pro: Secretarybird asks only interface 2, the one it answers on. On Linux,
+  `secbird list` took about a minute with this keypad plugged in; now it takes under a second
+  (#60).
+
 ## [0.5.1] - 2026-10-30
 
 ### Added
