@@ -55,6 +55,11 @@ pub struct TraySettings {
     /// or left as they are when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub away_lights: Option<String>,
+    /// Experimental: restart Spectrum on the devices together when one of them wakes, so
+    /// they cycle in step (see `wake_sync`). Wakes come from Windows Raw Input; no HID
+    /// polling. Off by default; read at start.
+    #[serde(default)]
+    pub spectrum_wake_sync: bool,
 }
 
 /// Choices for [`TraySettings::away_lights`], with the percent of the saved brightness.

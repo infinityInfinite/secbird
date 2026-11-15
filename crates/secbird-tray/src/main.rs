@@ -21,6 +21,8 @@ mod settings;
 mod studio;
 #[cfg(windows)]
 mod win;
+#[cfg(windows)]
+mod wake_sync;
 
 #[cfg(windows)]
 fn main() {

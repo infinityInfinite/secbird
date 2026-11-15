@@ -27,9 +27,16 @@ pub struct Input {
 }
 
 impl Input {
-    /// Listen or stop listening.
-    pub fn want(&mut self, hwnd: HWND, on: bool) {
+    /// Listen or stop listening. `kept`: Raw Input stays registered for mouse and keyboard
+    /// anyway (the Spectrum wake sync), so only start or stop reading it: registering here
+    /// would drop that registration's flags, and `RIDEV_REMOVE` would end it.
+    pub fn want(&mut self, hwnd: HWND, on: bool, kept: bool) {
         if on == self.on {
+            return;
+        }
+        if kept {
+            self.on = on;
+            self.down.clear();
             return;
         }
         let flags = if on { RIDEV_INPUTSINK } else { RIDEV_REMOVE };
@@ -41,6 +48,11 @@ impl Input {
         let ok = unsafe { RegisterRawInputDevices(list.as_ptr(), list.len() as u32, size_of::<RAWINPUTDEVICE>() as u32) } != 0;
         self.on = on && ok;
         self.down.clear();
+    }
+
+    /// Whether a scene wants key presses now.
+    pub fn is_on(&self) -> bool {
+        self.on
     }
 
     /// A `WM_INPUT`: the Razer device's product id and the key's names (empty for a click),
