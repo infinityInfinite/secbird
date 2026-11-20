@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Simplified Chinese editor**, thanks to Xnmk029 (#56, #82). Settings → Editor → Language:
+  system language, English or 简体中文. The choice is kept in the tray's settings. Device and
+  profile names, macros and key names stay as they are; the tray menu and the command line stay
+  English. Covers every screen, including RGB Studio, the headset and the scroll wheel.
+
+### Fixed
+- Huntsman V3 Pro TKL (02A7): the high polling rates (up to 8000 Hz) are offered; it doesn't
+  answer the standard polling command (#86).
+- Huntsman Mini (0257): uses transaction id 1F, as the board answers (#85).
+- Mice that answer none of Razer's button commands (Naga Chroma, #66) say button remapping isn't
+  supported, in place of an empty Buttons screen.
+
 ## [0.6.0] - 2026-11-15
 
 ### Added

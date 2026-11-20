@@ -55,7 +55,13 @@ pub struct TraySettings {
     /// or left as they are when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub away_lights: Option<String>,
+    /// Editor language: "en", "zh-CN", or automatic browser-language detection.
+    /// Kept here because the local editor uses a different origin after each restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor_language: Option<String>,
 }
+
+pub const EDITOR_LANGUAGES: [&str; 3] = ["auto", "en", "zh-CN"];
 
 /// Choices for [`TraySettings::away_lights`], with the percent of the saved brightness.
 pub const AWAY_LIGHTS: [(&str, u8); 2] = [("dim", 25), ("off", 0)];
@@ -65,6 +71,11 @@ pub const BATTERY_RANGE: std::ops::RangeInclusive<u8> = 1..=95;
 pub const BATTERY_DEFAULT: u8 = 15;
 
 impl TraySettings {
+    /// Validate hand-edited settings before embedding the value in the editor page.
+    pub fn editor_language(&self) -> &str {
+        self.editor_language.as_deref().filter(|value| EDITOR_LANGUAGES.contains(value)).unwrap_or("auto")
+    }
+
     /// The low battery level, falling back to the default for a missing or hand-edited value.
     pub fn low_battery(&self) -> u8 {
         self.battery_warning_at.filter(|v| BATTERY_RANGE.contains(v)).unwrap_or(BATTERY_DEFAULT)
@@ -145,5 +156,29 @@ pub fn open_config_folder() {
             null(),
             SW_SHOWNORMAL,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TraySettings;
+
+    #[test]
+    fn editor_language_survives_serialization_and_accepts_old_settings() {
+        let old: TraySettings = serde_json::from_str(r#"{"updates_off":true}"#).unwrap();
+        assert_eq!(old.editor_language(), "auto");
+        for language in ["auto", "en", "zh-CN"] {
+            let settings = TraySettings { editor_language: Some(language.into()), ..Default::default() };
+            let saved = serde_json::to_string(&settings).unwrap();
+            let restored: TraySettings = serde_json::from_str(&saved).unwrap();
+            assert_eq!(restored.editor_language(), language);
+        }
+    }
+
+    #[test]
+    fn unknown_editor_language_falls_back_without_resetting_other_options() {
+        let settings: TraySettings = serde_json::from_str(r#"{"editor_language":"<script>","updates_off":true}"#).unwrap();
+        assert_eq!(settings.editor_language(), "auto");
+        assert!(settings.updates_off);
     }
 }
