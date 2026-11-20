@@ -1,6 +1,10 @@
-//! Key presses and clicks for the Reactive and Ripple effects, through Raw Input on the tray
-//! window. Registered only while a scene uses them; only Razer devices count, and nothing but
-//! "which key went down on which device" leaves this module.
+//! Raw Input on the tray window, for the two things that listen to it: the Reactive and
+//! Ripple effects (key presses and clicks, while a scene uses them) and the watch for a
+//! wireless device that is asleep (its first input says it woke). Windows keeps one
+//! registration per kind of input for the whole program, so this module is the only one that
+//! asks for it: registered while either of the two needs it, dropped when neither does.
+//! Only Razer devices count, and nothing but "which device" and, for the effects, "which key
+//! went down" leaves this module.
 
 use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
@@ -19,56 +23,116 @@ const BUTTONS_DOWN: u16 = 0x0001 | 0x0004 | 0x0010 | 0x0040 | 0x0100;
 
 #[derive(Default)]
 pub struct Input {
-    on: bool,
+    /// The Studio listens: keys and clicks.
+    studio: bool,
+    /// The tray watches for input from a device that is asleep: from keyboards, from mice.
+    watch: (bool, bool),
+    /// What is registered with Windows right now: keyboards, mice.
+    on: (bool, bool),
     /// Raw Input device handle -> Razer product id (None for other makers).
     pids: HashMap<usize, Option<u16>>,
     /// Keys held, so auto-repeat doesn't count as more presses.
     down: HashSet<u16>,
 }
 
+/// What a `WM_INPUT` from a Razer device says.
+pub struct Seen {
+    /// The device's product id.
+    pub pid: u16,
+    /// For the Studio: a press, with the key's names (empty for a click). `None` for
+    /// anything else (a release, a repeat, a movement) and while the Studio doesn't listen.
+    pub press: Option<&'static [&'static str]>,
+}
+
 impl Input {
-    /// Listen or stop listening.
+    /// The Studio listens or stops listening.
     pub fn want(&mut self, hwnd: HWND, on: bool) {
-        if on == self.on {
-            return;
+        if on != self.studio {
+            self.studio = on;
+            self.down.clear();
         }
-        let flags = if on { RIDEV_INPUTSINK } else { RIDEV_REMOVE };
-        let target = if on { hwnd } else { null_mut() };
-        let list = [
-            RAWINPUTDEVICE { usUsagePage: 1, usUsage: KEYBOARD, dwFlags: flags, hwndTarget: target },
-            RAWINPUTDEVICE { usUsagePage: 1, usUsage: MOUSE, dwFlags: flags, hwndTarget: target },
-        ];
-        let ok = unsafe { RegisterRawInputDevices(list.as_ptr(), list.len() as u32, size_of::<RAWINPUTDEVICE>() as u32) } != 0;
-        self.on = on && ok;
-        self.down.clear();
+        self.register(hwnd);
     }
 
-    /// A `WM_INPUT`: the Razer device's product id and the key's names (empty for a click),
-    /// when it is a press.
-    pub fn read(&mut self, lparam: LPARAM) -> Option<(u16, &'static [&'static str])> {
+    /// Watch for input from a device that is asleep, by its kind (keyboards, mice), or stop.
+    pub fn watch(&mut self, hwnd: HWND, keys: bool, mice: bool) {
+        self.watch = (keys, mice);
+        self.register(hwnd);
+    }
+
+    /// Whether a watch that was asked for is on.
+    pub fn watching(&self) -> bool {
+        (self.watch.0 && self.on.0) || (self.watch.1 && self.on.1)
+    }
+
+    /// Ask Windows for what the Studio and the watch need together, kind by kind, and only
+    /// for a kind whose need changed: one of them stopping never drops what the other uses.
+    /// A change Windows refused (to register, or to stop) is asked for again on the next call.
+    fn register(&mut self, hwnd: HWND) {
+        let (keys, mice) = needed(self.studio, self.watch);
+        for (usage, on, want) in [(KEYBOARD, &mut self.on.0, keys), (MOUSE, &mut self.on.1, mice)] {
+            if *on == want {
+                continue;
+            }
+            let device = RAWINPUTDEVICE {
+                usUsagePage: 1,
+                usUsage: usage,
+                // INPUTSINK: also while another window has the focus (this one never does).
+                dwFlags: if want { RIDEV_INPUTSINK } else { RIDEV_REMOVE },
+                hwndTarget: if want { hwnd } else { null_mut() },
+            };
+            if unsafe { RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) } != 0 {
+                *on = want;
+            }
+        }
+    }
+
+    /// A `WM_INPUT`: `None` unless a Razer device sent it.
+    pub fn read(&mut self, lparam: LPARAM) -> Option<Seen> {
+        if !self.studio {
+            // Only the watch listens: who sent it is all that is read, never the input itself.
+            let header = unsafe { read_header(lparam)? };
+            return self.pid(header.hDevice).map(|pid| Seen { pid, press: None });
+        }
         let raw = unsafe { read_raw(lparam)? };
         let pid = self.pid(raw.header.hDevice)?;
-        match raw.header.dwType {
+        let press = match raw.header.dwType {
             t if t == RIM_TYPEKEYBOARD => {
                 let k = unsafe { raw.data.keyboard };
                 let code = k.MakeCode | if k.Flags as u32 & RI_KEY_E0 != 0 { 0xE000 } else { 0 };
                 if k.Flags as u32 & RI_KEY_BREAK != 0 {
                     self.down.remove(&code);
-                    return None;
+                    None
+                } else {
+                    self.down.insert(code).then(|| key_names(code))
                 }
-                self.down.insert(code).then(|| (pid, key_names(code)))
             }
             t if t == RIM_TYPEMOUSE => {
                 let flags = unsafe { raw.data.mouse.Anonymous.Anonymous.usButtonFlags };
-                (flags & BUTTONS_DOWN != 0).then_some((pid, &[][..]))
+                (flags & BUTTONS_DOWN != 0).then_some(&[][..])
             }
             _ => None,
-        }
+        };
+        Some(Seen { pid, press })
     }
 
     fn pid(&mut self, device: HANDLE) -> Option<u16> {
         *self.pids.entry(device as usize).or_insert_with(|| unsafe { razer_pid(device) })
     }
+}
+
+/// What to register for: the Studio takes keys and clicks, the watch the kinds it named.
+fn needed(studio: bool, watch: (bool, bool)) -> (bool, bool) {
+    (studio || watch.0, studio || watch.1)
+}
+
+/// The header of a raw input alone: which device sent it, and nothing of what it sent.
+unsafe fn read_header(lparam: LPARAM) -> Option<RAWINPUTHEADER> {
+    let size_of_header = size_of::<RAWINPUTHEADER>() as u32;
+    let mut header: RAWINPUTHEADER = std::mem::zeroed();
+    let mut size = size_of_header;
+    let got = GetRawInputData(lparam as HRAWINPUT, RID_HEADER, (&mut header as *mut RAWINPUTHEADER).cast(), &mut size, size_of_header);
+    (got == size_of_header).then_some(header)
 }
 
 unsafe fn read_raw(lparam: LPARAM) -> Option<RAWINPUT> {
@@ -194,5 +258,55 @@ mod tests {
         assert!(key_names(0x7F).is_empty());
         assert_eq!(parse_pid(r"\\?\HID#VID_1532&PID_0099&MI_00#7&1"), Some(0x0099));
         assert_eq!(parse_pid(r"\\?\HID#VID_046D&PID_C52B"), None);
+        // The keyboard collection of a DeathStalker V2 Pro receiver, as raw input names it.
+        // The same keyboard on its cable is another product (0292).
+        assert_eq!(parse_pid(r"\\?\HID#VID_1532&PID_0290&MI_00#a&1463a5&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}"), Some(0x0290));
+    }
+
+    #[test]
+    fn the_studio_and_the_watch_need_one_registration() {
+        // (keyboards, mice). The Studio takes both; the watch only the kind that is asleep.
+        assert_eq!(needed(false, (false, false)), (false, false));
+        assert_eq!(needed(true, (false, false)), (true, true));
+        assert_eq!(needed(false, (true, false)), (true, false));
+        assert_eq!(needed(false, (false, true)), (false, true));
+        // Both at once, then either one stopping: the other keeps what it uses.
+        assert_eq!(needed(true, (true, false)), (true, true));
+        assert_eq!(needed(false, (true, false)), (true, false));
+        assert_eq!(needed(true, (false, false)), (true, true));
+    }
+
+    /// The same against Windows itself: what stays registered when one of the two stops.
+    #[test]
+    fn one_listener_stopping_keeps_the_other_registered() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, HWND_MESSAGE};
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let hwnd = unsafe { CreateWindowExW(0, class.as_ptr(), null_mut(), 0, 0, 0, 0, 0, HWND_MESSAGE, null_mut(), null_mut(), null_mut()) };
+        assert!(!hwnd.is_null(), "no window to register raw input on");
+        let mut input = Input::default();
+
+        input.want(hwnd, true);
+        input.watch(hwnd, true, false);
+        assert_eq!((registered(), input.watching()), ((true, true), true));
+        input.watch(hwnd, false, false); // the device answered: the Studio still listens
+        assert_eq!((registered(), input.watching()), ((true, true), false));
+        input.watch(hwnd, false, true);
+        input.want(hwnd, false); // the scene ended: the watch still listens, for mice only
+        assert_eq!((registered(), input.watching()), ((false, true), true));
+        input.watch(hwnd, false, false);
+        assert_eq!(registered(), (false, false));
+
+        unsafe { DestroyWindow(hwnd) };
+    }
+
+    /// What this process has registered with Windows: (keyboards, mice).
+    fn registered() -> (bool, bool) {
+        let size = size_of::<RAWINPUTDEVICE>() as u32;
+        let mut list: [RAWINPUTDEVICE; 8] = unsafe { std::mem::zeroed() };
+        let mut count = list.len() as u32;
+        let got = unsafe { GetRegisteredRawInputDevices(list.as_mut_ptr(), &mut count, size) };
+        assert_ne!(got, u32::MAX, "GetRegisteredRawInputDevices failed");
+        let has = |usage| list[..got as usize].iter().any(|d| d.usUsagePage == 1 && d.usUsage == usage);
+        (has(KEYBOARD), has(MOUSE))
     }
 }
