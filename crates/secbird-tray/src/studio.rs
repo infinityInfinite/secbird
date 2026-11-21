@@ -51,8 +51,17 @@ const READ_EVERY: u32 = FPS;
 /// Static scenes and wired keyboards: send the whole frame again every few seconds, as
 /// keyboards drop per-key colours in quick adjustment mode without saying so (#45).
 const RESEND_EVERY: u32 = FPS * 3;
-/// Battery read once a minute.
+/// Battery read once a minute, on tick [`BATTERY_TICK`] of that minute. Wireless devices only
+/// get every [`WIRELESS_EVERY`]th tick, so the read has to fall on one of those: on any other
+/// it never happened, and a battery layer kept the level it had when the stream started.
 const BATTERY_EVERY: u32 = FPS * 60;
+const BATTERY_TICK: u32 = WIRELESS_EVERY;
+const _: () = assert!(BATTERY_TICK < BATTERY_EVERY && BATTERY_EVERY.is_multiple_of(WIRELESS_EVERY) && BATTERY_TICK.is_multiple_of(WIRELESS_EVERY));
+
+/// Whether this tick is the battery's turn.
+fn battery_turn(tick: u32) -> bool {
+    tick % BATTERY_EVERY == BATTERY_TICK
+}
 
 impl Default for Studio {
     fn default() -> Self {
@@ -196,7 +205,7 @@ impl Studio {
             let Some(dev) = devices.iter().find(|d| d.key() == key) else { continue };
             let (wireless, animated, started, battery_due) = {
                 let r = &self.running[&key];
-                (r.wireless, r.scene.animated(), r.last.is_some(), r.scene.uses(Kind::Battery) && (tick % BATTERY_EVERY == 1 || r.battery.is_none()))
+                (r.wireless, r.scene.animated(), r.last.is_some(), r.scene.uses(Kind::Battery) && (battery_turn(tick) || r.battery.is_none()))
             };
             if wireless && started && !tick.is_multiple_of(WIRELESS_EVERY) {
                 continue;
@@ -266,5 +275,37 @@ impl Studio {
         let keys = self.running.keys().cloned().collect();
         self.running.clear();
         keys
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secbird_core::sim::{Sim, WIRELESS_MOUSE_PID};
+    use secbird_core::studio::Layer;
+
+    /// A wireless device is skipped on every tick but each [`WIRELESS_EVERY`]th. The battery's
+    /// turn used to be tick 1 of each minute, which is never one of those, so a battery layer
+    /// kept showing the level from when its stream started while the device charged.
+    #[test]
+    fn a_wireless_device_gets_its_battery_read_again() {
+        let sim = Sim::wireless_mouse();
+        let dev = sim.open(WIRELESS_MOUSE_PID, Sim::spec_for(WIRELESS_MOUSE_PID)).expect("the simulated wireless mouse");
+        let key = dev.key();
+        let scene = Scene { layers: vec![Layer::parse(&["battery".to_string()]).expect("a battery layer")] };
+        let canvas = Canvas::for_device(&dev, &[]);
+        // A stream that started a minute ago, when the battery was at 75 %.
+        let last = Some(vec![Rgb(0, 0, 0); canvas.pixels.len()]);
+        let mut studio = Studio { dirty: false, tick: BATTERY_EVERY, ..Studio::default() };
+        studio.running.insert(key.clone(), Running { profile: "Default".into(), scene, canvas, last, failures: 0, wireless: true, battery: Some(75) });
+        sim.state().battery = Some(255); // charged since
+        let devices = [dev];
+        let no_profiles = std::path::Path::new("no-profiles.json");
+
+        // Ticks 1801 and 1802 of this minute are not the device's; 1803 is, and the battery's.
+        for (tick, level) in [(BATTERY_EVERY + 1, 75), (BATTERY_EVERY + 2, 75), (BATTERY_EVERY + 3, 100)] {
+            studio.tick(&devices, None, no_profiles, false, false);
+            assert_eq!((studio.tick, studio.running[&key].battery), (tick, Some(level)));
+        }
     }
 }
