@@ -44,6 +44,10 @@ pub struct Profile {
     /// `dark`), see [`crate::Dimming`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dimming: Option<String>,
+    /// Laptops: performance mode (`silent`, `balanced`, `performance`, `custom:<cpu>:<gpu>`),
+    /// see [`crate::laptop::Power`]. Per profile, so a profile tied to a game can turn it up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power: Option<String>,
     /// Keyboards: the keys gaming mode blocks (`off`, or like `win,alt-tab`), see
     /// [`crate::GameMode`]. Per profile, so a profile tied to a game can turn it on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -436,6 +440,9 @@ impl Profile {
         }
         if let Some(d) = &self.dimming {
             push(format!("keyboard when idle: {d}"), d.parse().and_then(|d| dev.set_dimming(d)));
+        }
+        if let Some(p) = &self.power {
+            push(format!("performance mode: {p}"), p.parse().and_then(|p| dev.set_power(p)));
         }
         if let Some(g) = &self.game_mode {
             push(format!("gaming mode: {g}"), g.parse().and_then(|g| dev.set_game_mode(g)));

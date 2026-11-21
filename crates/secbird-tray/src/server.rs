@@ -313,6 +313,12 @@ struct Body {
     /// Laptop keyboard when idle: stays-lit, half, quarter or dark.
     #[serde(default)]
     dimming: String,
+    /// Blade laptops: performance mode, like `balanced` or `custom:2:1`.
+    #[serde(default)]
+    power: String,
+    /// Blade laptops: battery charge limit in percent, 100 for none.
+    #[serde(default)]
+    charge_limit: u8,
     /// Keyboards: the keys gaming mode blocks, `off` or like `win,alt-tab`.
     #[serde(default)]
     game_mode: String,
@@ -426,6 +432,19 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 actions::set_dimming(dev, &mut store, b.dimming.parse()?)?;
                 Ok(json!({ "dimming": dev.dimming().ok().flatten().map(|d| d.to_string()) }))
             }
+            "/api/power" => {
+                actions::set_power(dev, &mut store, b.power.parse()?)?;
+                Ok(json!({ "power": dev.power().ok().flatten().map(|p| p.to_string()) }))
+            }
+            "/api/charge-limit" => {
+                dev.set_charge_limit(b.charge_limit)?;
+                Ok(json!({ "charge_limit": dev.charge_limit().ok().flatten() }))
+            }
+            // Fan speeds and temperatures, read each time the editor asks (every few
+            // seconds while the Performance panel is open).
+            "/api/laptop-sensors" => Ok(json!(dev.laptop_sensors().map(|s| json!({
+                "fans": s.fans, "cpu_temp": s.cpu_temp, "gpu_temp": s.gpu_temp,
+            })))),
             "/api/gaming" => {
                 actions::set_game_mode(dev, &mut store, b.game_mode.parse()?)?;
                 Ok(json!({ "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()) }))
@@ -870,6 +889,10 @@ fn device_json(dev: &Device) -> Value {
             .map(|s| json!({ "active": s.active, "list": s.stages, "max": secbird_core::commands::MAX_DPI_STAGES })),
         "sleep": sleep_json(dev),
         "dimming": dev.dimming().ok().flatten().map(|d| d.to_string()),
+        // Blade laptops whose controller answers get the Performance section; the charge
+        // limit only where it can be read back.
+        "power": dev.power().ok().flatten().map(|p| p.to_string()),
+        "charge_limit": dev.charge_limit().ok().flatten(),
         // Only keyboards that answer the read get the Gaming section.
         "game_mode": dev.game_mode().ok().flatten().map(|g| g.to_string()),
         // Only mice whose wheel answers get the Scroll wheel section.

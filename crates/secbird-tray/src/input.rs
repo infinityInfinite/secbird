@@ -21,6 +21,9 @@ const RI_KEY_BREAK: u32 = 1;
 const RI_KEY_E0: u32 = 2;
 const BUTTONS_DOWN: u16 = 0x0001 | 0x0004 | 0x0010 | 0x0040 | 0x0100;
 
+/// Raw input handles remembered at most; more than any desk has devices.
+const PIDS_KEPT: usize = 64;
+
 #[derive(Default)]
 pub struct Input {
     /// The Studio listens: keys and clicks.
@@ -117,6 +120,11 @@ impl Input {
     }
 
     fn pid(&mut self, device: HANDLE) -> Option<u16> {
+        // Windows gives a device a new handle each time it comes back (a dock replugged), so
+        // the cache is started over now and then instead of growing for as long as the tray runs.
+        if self.pids.len() >= PIDS_KEPT && !self.pids.contains_key(&(device as usize)) {
+            self.pids.clear();
+        }
         *self.pids.entry(device as usize).or_insert_with(|| unsafe { razer_pid(device) })
     }
 }

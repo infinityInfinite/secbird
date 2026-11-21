@@ -146,6 +146,25 @@
   .dimkey { flex: none; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line-strong);
     background: color-mix(in srgb, var(--accent) calc(var(--lvl) * 100%), transparent); }
   @media (max-width: 420px) { .dimgrid { grid-template-columns: minmax(0, 1fr); } }
+  /* Blade performance: beside each mode a four-step meter, lit as far as the mode goes. */
+  .pwrbars { flex: none; display: inline-flex; align-items: flex-end; gap: 2px; width: 24px; height: 24px; padding: 4px;
+    box-sizing: border-box; border-radius: 6px; border: 1px solid var(--line-strong); }
+  .pwrbars i { flex: 1; border-radius: 1.5px; background: var(--line); }
+  .pwrbars i:nth-child(1) { height: 35%; } .pwrbars i:nth-child(2) { height: 55%; }
+  .pwrbars i:nth-child(3) { height: 78%; } .pwrbars i:nth-child(4) { height: 100%; }
+  .pwrbars i.on { background: var(--accent); }
+  .tile[aria-pressed=true] .pwrbars { border-color: color-mix(in srgb, var(--on-accent) 45%, transparent); }
+  .tile[aria-pressed=true] .pwrbars i { background: color-mix(in srgb, var(--on-accent) 22%, transparent); }
+  .tile[aria-pressed=true] .pwrbars i.on { background: var(--on-accent); }
+  .boostrow { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 10px; }
+  .boostrow > span { color: var(--muted); font-size: 13px; font-weight: 600; }
+  .boostrow .seg { justify-self: start; }
+  .readouts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .readouts > div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px 10px; }
+  .readouts span { display: block; color: var(--muted); font-size: 12px; }
+  .readouts b { color: var(--value); font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .readouts b small { color: var(--muted); font-size: 12.5px; font-weight: 400; margin-left: 3px; }
+  .readouts .unset { color: var(--faint); font-size: 14px; font-weight: 400; }
   @media (max-width: 600px) { .tile .tv { white-space: normal; overflow-wrap: anywhere; } }
   .tv small { color: var(--muted); font-weight: 400; }
   .big { font-size: 17px; font-weight: 650; color: var(--value); }
@@ -1114,6 +1133,14 @@ function sections() {
   if (dev.sleep) power.push({ key: 'sleep', label: uiText('Sleep when idle') });
   if (dev.dimming) power.push({ key: 'dimming', label: uiText('Keyboard when idle') });
   if (power.length) s.push({ id: 'power', name: uiText('Power'), rows: power });
+  // Blade laptops whose controller answers: mode and charge limit set here, fans and
+  // temperatures shown live. The charge limit only where the laptop reports it back.
+  if (dev.power) s.push({ id: 'perf', name: uiText('Performance'), rows: [
+    { key: 'perf', label: uiText('Performance mode') },
+    dev.charge_limit != null && { key: 'charge', label: uiText('Charge limit') },
+    { key: 'fans', label: uiText('Fans') },
+    { key: 'temps', label: uiText('Temperatures') },
+  ].filter(Boolean) });
   if (dev.kind === 'headset' && dev.audio) {
     const has = (...names) => names.some(n => (dev.audio && dev.audio[n]) || (dev.audio_errors && dev.audio_errors[n]));
     s.push({ id: 'audio', name: uiText('Audio'), rows: [
@@ -1161,6 +1188,7 @@ function railSummary(s) {
     return sl.auto === false ? uiText('Never sleeps') : uiText('Sleeps after ') + sl.minutes + uiText(' min');
   }
   if (s.id === 'audio') return uiText('EQ, mic, noise cancelling');
+  if (s.id === 'perf') return powerText(dev.power) + ' · ' + uiText('beta');
   if (s.id === 'profile') { const a = p.apps || []; return a.length ? a.join(', ') : uiText('No games yet'); }
   if (s.id === 'device') return dev.firmware ? uiText('Firmware ') + dev.firmware : (KINDS[dev.kind] || uiText('Device'));
   return '';
@@ -1181,6 +1209,7 @@ function renderRail(secs) {
 function showSection(id) {
   if (section === id) return;
   section = id;
+  if (id === 'perf') setTimeout(pollSensors);
   sel = autoOpen(sections().find(s => s.id === id));
   remember('section:' + dev.pid, id);
   renderWork();
@@ -1502,7 +1531,7 @@ function renderCompare() {
   secs.forEach(s => {
     const body = el('tbody');
     body.append(el('tr', { className: 'grp' }, el('th', { colSpan: span, scope: 'rowgroup', textContent: s.name + (s.id === 'buttons' && btnLayer === 'hypershift' ? ' · HyperShift' : '') })));
-    let rowsOf = s.loading ? [{ key: 'loading', label: uiText('Reading buttons…') }] : s.rows.filter(r => r.key !== 'lighting-control');
+    let rowsOf = s.loading ? [{ key: 'loading', label: uiText('Reading buttons…') }] : s.rows.filter(r => !['lighting-control', 'charge', 'fans', 'temps'].includes(r.key));
     // A keyboard has a hundred keys: only those some profile changes.
     if (s.id === 'buttons' && isBoard() && !s.loading) {
       const skey = r => btnLayer === 'normal' ? r.name : r.name + '/hypershift';
@@ -1590,6 +1619,13 @@ function cellView(key, name) {
     return [st.list.map((d, i) => { const v = d[0] === d[1] ? d[0] : d[0] + '×' + d[1];
       return i + 1 === st.active ? `<b class="num">${v}</b>` : `<span class="num">${v}</span>`; }).join(' · ')];
   }
+  if (key === 'perf') {
+    const v = powerOf(name);
+    return [v ? esc(powerText(v)) : `<span class="unset">${esc(uiText('Not set'))}</span>`];
+  }
+  // Kept by the laptop for every profile, and read live: the same in every column.
+  if (key === 'charge') return [dev.charge_limit === 100 ? uiText('None') : `<span class="num">${dev.charge_limit}</span> %`];
+  if (key === 'fans' || key === 'temps') return [sensorText(key)];
   if (key === 'dimming') {
     const d = dimmingOf(name);
     return [d ? DIMMING[d] : `<span class="unset">${esc(uiText('Not set'))}</span>`];
@@ -1678,6 +1714,9 @@ function buildEditor(host, r) {
   else if (r.key === 'stages') stagesEditor(box);
   else if (r.key === 'sleep') sleepEditor(box);
   else if (r.key === 'dimming') dimmingEditor(box);
+  else if (r.key === 'perf') perfEditor(box);
+  else if (r.key === 'charge') chargeEditor(box);
+  else if (r.key === 'fans' || r.key === 'temps') sensorsEditor(box);
   else if (r.key === 'gaming') gamingEditor(box);
   else if (r.key === 'scroll') scrollEditor(box);
   else if (r.key === 'onboard') onboardEditor(box);
@@ -2951,6 +2990,142 @@ function dimmingEditor(box) {
   box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('When the laptop is idle') }), grid),
     el('p', { className: 'note', textContent: uiText('A keypress brings it back to full brightness. Synapse calls this Smart Dimming.') }),
     el('p', { className: 'note', textContent: uiText('New and not yet confirmed on a laptop. If it goes dark anyway with Stays lit, please tell us.') }));
+}
+
+// Blade laptops: the controller's performance mode (per profile), its charge limit (kept by
+// the laptop), and fan speeds and temperatures read live. Beta: the reads are seen on three
+// Blades' reports, the writes are untested on one; each is read back, so a laptop that
+// doesn't keep a setting says so.
+const POWER_MODES = [
+  ['silent', uiText('Silent'), uiText('Quiet fans, lowest power'), 1],
+  ['balanced', uiText('Balanced'), uiText('For everyday use'), 2],
+  ['performance', uiText('Performance'), uiText('Most power, louder fans'), 3],
+  ['custom', uiText('Custom'), uiText('CPU and GPU boost set by you'), 4],
+];
+const CPU_BOOST = [uiText('Low'), uiText('Medium'), uiText('High'), uiText('Boost')];
+const GPU_BOOST = [uiText('Low'), uiText('Medium'), uiText('High')];
+const laptopSensors = {};
+function powerOf(name) { return name === dev.active && dev.power ? dev.power : prof(name).power; }
+// The mode alone, for tiles and the rail; `full` adds Custom's boost levels.
+function powerText(v, full) {
+  if (!v) return '';
+  const [mode, cpu, gpu] = v.split(':');
+  const m = POWER_MODES.find(x => x[0] === mode);
+  if (!m) return uiText('Set elsewhere');
+  return cpu == null || !full ? m[1] : uiText`${m[1]} · CPU ${(CPU_BOOST[cpu] || cpu).toLowerCase()}, GPU ${(GPU_BOOST[gpu] || gpu).toLowerCase()}`;
+}
+function sensorText(key) {
+  const s = laptopSensors[dev.id];
+  if (s === undefined) return '<span class="unset">…</span>';
+  if (key === 'fans') {
+    return s && s.fans.length ? s.fans.map(r => `<span class="num">${r}</span>`).join(' · ') + ' <small>rpm</small>'
+      : `<span class="unset">${esc(uiText('Not reported'))}</span>`;
+  }
+  return s && s.cpu_temp != null ? uiText`CPU ${`<span class="num">${s.cpu_temp}</span>`} °C · GPU ${`<span class="num">${s.gpu_temp ?? '–'}</span>`} °C`
+    : `<span class="unset">${esc(uiText('Not reported'))}</span>`;
+}
+// Every 3 seconds while the Performance section is in front; nothing is read otherwise.
+async function pollSensors() {
+  if (document.hidden || !dev || !dev.power || showAll || showStudio || showSettings || view === 'compare' || section !== 'perf') return;
+  const id = dev.id;
+  try { laptopSensors[id] = await api('/api/laptop-sensors', {}); } catch { return; }
+  if (!dev || dev.id !== id || section !== 'perf') return;
+  refreshCell('fans'); refreshCell('temps');
+  const r = $('pwrReadouts'); if (r) drawReadouts(r);
+}
+setInterval(pollSensors, 3000);
+
+function perfEditor(box) {
+  const grid = el('div', { className: 'dimgrid', role: 'group', ariaLabel: uiText('Performance mode') });
+  const boost = el('div', { className: 'edgroup' });
+  const lit = (bars, n) => [...bars.children].forEach((b, i) => b.classList.toggle('on', i < n));
+  const draw = () => {
+    const [mode, cpu] = (dev.power || '').split(':');
+    [...grid.children].forEach(t => {
+      t.setAttribute('aria-pressed', t.dataset.v === mode);
+      // Custom's meter follows its CPU boost.
+      if (t.dataset.v === 'custom') lit(t.querySelector('.pwrbars'), cpu != null ? +cpu + 1 : 4);
+    });
+    boost.hidden = mode !== 'custom';
+    boost.querySelectorAll('.seg').forEach(g => [...g.children].forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.v === (dev.power || '').split(':')[g.dataset.part === 'cpu' ? 1 : 2])));
+  };
+  const send = async (power, done) => {
+    try {
+      const r = await api('/api/power', { power });
+      dev.power = r.power; dev.profile.power = r.power;
+      draw(); refreshCell('perf');
+      toast(powerText(r.power, true) + uiText(' · saved to ') + dev.active);
+    } catch (err) { toast(err.message, true); }
+    done();
+  };
+  POWER_MODES.forEach(([v, text, sub, n]) => {
+    const bars = el('span', { className: 'pwrbars', ariaHidden: 'true' }, el('i'), el('i'), el('i'), el('i'));
+    lit(bars, n);
+    grid.append(el('button', { className: 'tile', dataset: { v }, onclick: e => {
+      if ((dev.power || '').split(':')[0] === v) return;
+      const t = e.currentTarget; t.disabled = true;
+      send(v, () => { t.disabled = false; });
+    } }, bars, el('div', {}, el('span', { className: 'tv', textContent: text }), el('span', { className: 'tl', textContent: sub }))));
+  });
+  const seg = (part, label, names) => el('div', { className: 'boostrow' }, el('span', { textContent: label }),
+    el('div', { className: 'seg', role: 'group', ariaLabel: label + uiText(' boost'), dataset: { part } },
+      ...names.map((name, i) => el('button', { textContent: name, dataset: { v: String(i) }, onclick: e => {
+        const [, cpu = '1', gpu = '1'] = (dev.power || '').split(':');
+        const want = part === 'cpu' ? `custom:${i}:${gpu}` : `custom:${cpu}:${i}`;
+        if (want === dev.power) return;
+        const g = e.currentTarget.parentElement; g.querySelectorAll('button').forEach(b => b.disabled = true);
+        send(want, () => g.querySelectorAll('button').forEach(b => b.disabled = false));
+      } }))));
+  boost.append(el('h3', { textContent: uiText('Boost') }), seg('cpu', 'CPU', CPU_BOOST), seg('gpu', 'GPU', GPU_BOOST));
+  draw();
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Performance mode') }), grid), boost,
+    el('p', { className: 'note', textContent: uiText`Saved in ${dev.active}, so a profile tied to a game can switch the laptop to Performance and back. Changing the mode sets the fans to automatic.` }),
+    el('p', { className: 'note', textContent: uiText('Beta. Built from public protocol facts; the laptop is asked back after every change, and if it doesn’t keep a mode you’ll see it here. Please tell us how it goes on your Blade.') }));
+}
+
+function chargeEditor(box) {
+  const v = dev.charge_limit;
+  const val = el('span', { className: 'val num', textContent: (v === 100 ? 80 : v) + ' %' });
+  const on = el('input', { type: 'checkbox', className: 'switch', id: 'chargeOn', checked: v !== 100 });
+  const slider = el('input', { type: 'range', min: 60, max: 95, step: 5, value: v === 100 ? 80 : Math.min(95, v),
+    ariaLabel: uiText('Stop charging at'), disabled: v === 100, oninput: e => { val.textContent = e.target.value + ' %'; } });
+  const send = async want => {
+    on.disabled = slider.disabled = true;
+    try {
+      const r = await api('/api/charge-limit', { charge_limit: want });
+      dev.charge_limit = r.charge_limit;
+      refreshCell('charge');
+      toast(r.charge_limit === 100 ? uiText('Charges to 100 %') : uiText`Stops charging at ${r.charge_limit} %`);
+    } catch (err) { toast(err.message, true); }
+    on.disabled = false; on.checked = dev.charge_limit !== 100; slider.disabled = !on.checked;
+  };
+  slider.style.flex = '1';
+  const slideRow = el('div', { className: 'row' }, slider, val);
+  slideRow.style.flexWrap = 'nowrap';
+  on.onchange = () => send(on.checked ? +slider.value : 100);
+  slider.onchange = () => send(+slider.value);
+  box.append(el('div', { className: 'edgroup' }, el('div', { className: 'row' }, on, el('label', { htmlFor: 'chargeOn', textContent: uiText('Limit charging') })),
+    el('h3', { textContent: uiText('Stop charging at') }), slideRow),
+    el('p', { className: 'note', textContent: uiText('Kept by the laptop itself, for every profile. A laptop that stays plugged in keeps a healthier battery stopping at 80 %. Synapse calls this Battery Health Optimizer.') }),
+    el('p', { className: 'note', textContent: uiText('Beta: if the laptop doesn’t keep the limit, you’ll see an error and nothing changes.') }));
+}
+
+function drawReadouts(host) {
+  const s = laptopSensors[dev.id];
+  const cell = (label, value, unit) => el('div', {}, el('span', { textContent: label }),
+    value == null ? el('b', {}, el('span', { className: 'unset', textContent: s === undefined ? '…' : uiText('Not reported') }))
+      : el('b', {}, String(value), el('small', { textContent: unit })));
+  host.replaceChildren(
+    cell(uiText('CPU fan'), s && s.fans[0], 'rpm'), cell(uiText('GPU fan'), s && s.fans[1], 'rpm'),
+    cell(uiText('Near the CPU'), s && s.cpu_temp, '°C'), cell(uiText('Near the GPU'), s && s.gpu_temp, '°C'));
+}
+function sensorsEditor(box) {
+  const host = el('div', { className: 'readouts', id: 'pwrReadouts', role: 'status', ariaLive: 'off' });
+  drawReadouts(host);
+  box.append(el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('Right now') }), host),
+    el('p', { className: 'note', textContent: uiText('Read from the laptop every 3 seconds while this section is open. The fans follow the performance mode; Secretarybird never sets their speed.') }),
+    el('p', { className: 'note', textContent: uiText('The temperatures come from the laptop’s controller, which sits near the chips, so they read lower than the CPU’s own sensor.') }));
 }
 
 // Save to mouse: the profile's button remaps written into the mouse's on-board slot, so they

@@ -117,6 +117,9 @@ const LAPTOP_PROBES: &[(&str, Command, u8, &[u8])] = &[
     ("sku", Command::new(0x0D, 0x8F), 0x01, &[]),
     ("cpu boost / power mode", Command::new(0x07, 0x8F), 0x01, &[]),
     ("charge limiter", Command::new(0x07, 0x92), 0x01, &[]),
+    ("cpu boost", Command::new(0x0D, 0x87), 0x03, &[0, 1]),
+    ("gpu boost", Command::new(0x0D, 0x87), 0x03, &[0, 2]),
+    ("temperatures", Command::new(0x0D, 0x85), 0x03, &[0]),
     ("adapter wattage", Command::new(0x07, 0x8C), 0x02, &[]),
     // Profile 1, as Synapse asks; profile 0 answers all zeros (#20).
     ("smart dimming", Command::new(0x07, 0x93), 0x03, &[1]),

@@ -1,14 +1,28 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.1] - 2026-11-21
 
 ### Added
+- **Blade laptops: performance mode, charge limit, fans and temperatures (beta).** A new
+  Performance section on Blade laptops whose controller answers: Silent, Balanced, Performance
+  or Custom with CPU and GPU boost, saved in the profile (so a game's profile can switch the
+  laptop to Performance); a battery charge limit (60-100 %) where the laptop reports one; and
+  the fan speeds and controller temperatures, read live. Only the controller's own presets are
+  written, never a fan speed, and every change is read back: a laptop that doesn't keep a
+  setting says so. The reads match three Blades' reports (#7, #20, #23); the writes are
+  untested on a real Blade, so please report how it goes. Command line: `secbird power` and
+  `secbird charge-limit`. Command bytes from razer-ctl and blade-control (both MIT).
 - **Simplified Chinese editor**, thanks to Xnmk029 (#56, #82). Settings → Editor → Language:
   system language, English or 简体中文. The choice is kept in the tray's settings. Device and
   profile names, macros and key names stay as they are; the tray menu and the command line stay
   English. Covers every screen, including RGB Studio, the headset and the scroll wheel.
 
 ### Fixed
+- A wireless keyboard or mouse behind a receiver on a dock is found again after the dock is
+  plugged back in: its first key press or movement starts the search, and the editor shows it
+  without a Rescan. Thanks to a3k7dotmd (#84, #92).
+- RGB Studio's battery layer on a wireless device follows the battery again; it kept the level
+  from when the stream started. Thanks to a3k7dotmd (#93).
 - Huntsman V3 Pro TKL (02A7): the high polling rates (up to 8000 Hz) are offered; it doesn't
   answer the standard polling command (#86).
 - Huntsman Mini (0257): uses transaction id 1F, as the board answers (#85).

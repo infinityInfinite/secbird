@@ -75,6 +75,15 @@ pub fn set_dimming(dev: &Device, store: &mut Store, dimming: crate::Dimming) -> 
     store.save()
 }
 
+/// Laptops: performance mode, kept in the active profile.
+pub fn set_power(dev: &Device, store: &mut Store, power: crate::laptop::Power) -> Result<()> {
+    dev.set_power(power)?;
+    // What the laptop runs now, boost included, so the profile holds what was kept.
+    let now = dev.power()?.unwrap_or(power);
+    store.for_device(dev).active_mut().power = Some(now.to_string());
+    store.save()
+}
+
 pub fn set_game_mode(dev: &Device, store: &mut Store, mode: crate::GameMode) -> Result<()> {
     dev.set_game_mode(mode)?;
     store.for_device(dev).active_mut().game_mode = Some(mode.to_string());

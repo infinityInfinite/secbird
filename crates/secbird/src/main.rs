@@ -30,6 +30,11 @@ SETTINGS (saved to the active profile):
   dimming [stays-lit|half|quarter|dark]
                             Laptops: what the keyboard backlight does when idle
                             (Synapse's Smart Dimming). Untested on hardware yet
+  power [silent|balanced|performance|custom [CPU GPU]]
+                            Blade laptops (beta): performance mode; custom takes CPU
+                            boost 0-3 and GPU boost 0-2. Saved in the active profile
+  charge-limit [60-100]     Blade laptops (beta): stop charging at this percent; 100
+                            for no limit. Kept by the laptop, not the profile
   gaming [off|win,alt-tab,alt-f4]
                             Keyboards: gaming mode, the keys it blocks (any of win,
                             alt-tab and alt-f4). Untested on hardware yet
@@ -465,6 +470,40 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
                 Ok(())
             }
         },
+        "power" => match rest.first() {
+            None => {
+                match dev.power()? {
+                    None => println!("Only Blade laptops have performance modes."),
+                    Some(p) => println!("Performance mode: {}", power_text(p)),
+                }
+                Ok(())
+            }
+            Some(mode) => {
+                let text = match rest.get(1..) {
+                    Some([cpu, gpu]) => format!("{mode}:{cpu}:{gpu}"),
+                    Some([]) | None => mode.to_string(),
+                    _ => return Err(Error::InvalidArg("power custom takes two levels: CPU 0-3 and GPU 0-2".into())),
+                };
+                actions::set_power(dev, &mut store, text.parse()?)?;
+                println!("Performance mode: {}", dev.power()?.map_or("?".into(), power_text));
+                Ok(())
+            }
+        },
+        "charge-limit" => match rest.first() {
+            None => {
+                match dev.charge_limit()? {
+                    None => println!("This laptop doesn't report a charge limit."),
+                    Some(p) => println!("Charge limit: {}", limit_text(p)),
+                }
+                Ok(())
+            }
+            Some(v) => {
+                let p: u8 = v.parse().map_err(|_| Error::InvalidArg(format!("'{v}': a percent, 60 to 100")))?;
+                dev.set_charge_limit(p)?;
+                println!("Charge limit: {}", limit_text(p));
+                Ok(())
+            }
+        },
         "gaming" => match rest.first() {
             None => {
                 match dev.game_mode()? {
@@ -665,6 +704,9 @@ fn profile_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), E
             }
             if let Some(d) = &p.dimming {
                 println!("  dimming    {d}");
+            }
+            if let Some(power) = &p.power {
+                println!("  power      {power}");
             }
             if let Some(g) = &p.game_mode {
                 println!("  gaming     {g}");
@@ -960,6 +1002,28 @@ fn report_apply(results: Vec<secbird_core::profile::Applied>) -> Result<(), Erro
     Ok(())
 }
 
+fn power_text(p: secbird_core::laptop::Power) -> String {
+    use secbird_core::laptop::PowerMode::*;
+    const CPU: [&str; 4] = ["low", "medium", "high", "boost"];
+    const GPU: [&str; 3] = ["low", "medium", "high"];
+    match (p.mode, p.boost) {
+        (Silent, _) => "Silent".into(),
+        (Balanced, _) => "Balanced".into(),
+        (Performance, _) => "Performance".into(),
+        (Custom, Some((c, g))) => format!(
+            "Custom (CPU {}, GPU {})",
+            CPU.get(c as usize).unwrap_or(&"?"),
+            GPU.get(g as usize).unwrap_or(&"?")
+        ),
+        (Custom, None) => "Custom".into(),
+        (Other(b), _) => format!("set elsewhere (mode {b})"),
+    }
+}
+
+fn limit_text(percent: u8) -> String {
+    if percent == 100 { "none".into() } else { format!("{percent} %") }
+}
+
 fn dimming_text(d: secbird_core::Dimming) -> &'static str {
     use secbird_core::Dimming::*;
     match d {
@@ -1063,6 +1127,21 @@ fn info(dev: &Device, store: &mut Store) -> Result<(), Error> {
     }
     if let Ok(Some(d)) = dev.dimming() {
         println!("Dimming   {}", dimming_text(d));
+    }
+    if let Ok(Some(p)) = dev.power() {
+        println!("Power     {}", power_text(p));
+    }
+    if let Ok(Some(p)) = dev.charge_limit() {
+        println!("Charging  limit {}", limit_text(p));
+    }
+    if let Some(s) = dev.laptop_sensors() {
+        let fans: Vec<String> = s.fans.iter().map(|r| format!("{r} rpm")).collect();
+        if !fans.is_empty() {
+            println!("Fans      {}", fans.join(", "));
+        }
+        if let (Some(c), Some(g)) = (s.cpu_temp, s.gpu_temp) {
+            println!("Temps     CPU {c} °C, GPU {g} °C (controller sensors)");
+        }
     }
     if let Ok(Some(g)) = dev.game_mode() {
         println!("Gaming    {}", game_mode_text(g));

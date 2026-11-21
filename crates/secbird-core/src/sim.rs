@@ -49,6 +49,81 @@ const KEYBOARD_SPEC: &str = r#"{"pid":"FFF3","name":"Simulated Keyboard","kind":
 /// A stored macro: its 250-byte header and its steps.
 pub type SimMacro = (Vec<u8>, Vec<u8>);
 
+/// A Blade's embedded controller, as razer-ctl and blade-control describe it.
+#[derive(Debug, Clone)]
+pub struct LaptopSim {
+    /// Mode byte per zone (CPU, GPU).
+    pub modes: [u8; 2],
+    /// Boost per cluster (CPU, GPU).
+    pub boost: [u8; 2],
+    /// Fan speed per zone, in hundreds of RPM.
+    pub fans: [u8; 2],
+    pub temps: (u8, u8),
+    /// The charge limit byte; `None`: the 2020 firmware, which echoes class 07 and keeps nothing.
+    pub charge: Option<u8>,
+    /// The byte it keeps for Performance: 2, or 1 (Gaming) on the 2020 Blades.
+    pub performance: u8,
+}
+
+impl LaptopSim {
+    /// A newer Blade: every mode, boost, fans, temperatures and a charge limit (none set).
+    pub fn modern() -> Self {
+        LaptopSim { modes: [0, 0], boost: [1, 1], fans: [22, 24], temps: (48, 44), charge: Some(0x50), performance: 2 }
+    }
+
+    /// A 2020 Blade: Gaming for Performance, no fan speeds, a charge limit only echoed.
+    pub fn base_2020() -> Self {
+        LaptopSim { charge: None, performance: 1, ..LaptopSim::modern() }
+    }
+
+    fn handle(&mut self, c: Command, a: &[u8]) -> (Status, Vec<u8>) {
+        let ok = |v: Vec<u8>| (Status::Success, v);
+        let zone = |z: u8| matches!(z, 1 | 2).then(|| z as usize - 1);
+        match (c.class, c.id) {
+            (0x0D, 0x82) => match zone(a[1]) {
+                Some(z) => ok(vec![0, a[1], self.modes[z], 0]),
+                None => (Status::Failed, vec![]),
+            },
+            (0x0D, 0x02) => match zone(a[1]) {
+                // Modes 0, 4 and 5 everywhere; Performance only as this model's byte.
+                Some(z) if matches!(a[2], 0 | 4 | 5) || a[2] == self.performance => {
+                    self.modes[z] = a[2];
+                    ok(a[..4].to_vec())
+                }
+                // The 2020 firmware takes a byte it doesn't have and keeps what it had.
+                Some(_) if self.performance == 1 => ok(a[..4].to_vec()),
+                _ => (Status::Failed, vec![]),
+            },
+            (0x0D, 0x87) => match zone(a[1]) {
+                Some(z) => ok(vec![0, a[1], self.boost[z]]),
+                None => (Status::Failed, vec![]),
+            },
+            (0x0D, 0x07) => match zone(a[1]) {
+                // Boost is only kept in Custom.
+                Some(z) if self.modes == [4, 4] => {
+                    self.boost[z] = a[2];
+                    ok(a[..3].to_vec())
+                }
+                Some(_) => ok(a[..3].to_vec()),
+                None => (Status::Failed, vec![]),
+            },
+            (0x0D, 0x88) if self.performance == 2 => match zone(a[1]) {
+                Some(z) => ok(vec![0, a[1], self.fans[z]]),
+                None => (Status::Failed, vec![]),
+            },
+            (0x0D, 0x85) => ok(vec![2, self.temps.0, self.temps.1]),
+            (0x07, 0x92) => ok(vec![self.charge.unwrap_or(a[0])]),
+            (0x07, 0x12) => {
+                if self.charge.is_some() {
+                    self.charge = Some(a[0]);
+                }
+                ok(vec![a[0]])
+            }
+            _ => (Status::NotSupported, vec![]),
+        }
+    }
+}
+
 /// Everything the simulated device remembers. Tests read and tweak it via [`Sim::state`].
 #[derive(Debug, Clone)]
 pub struct SimState {
@@ -71,6 +146,8 @@ pub struct SimState {
     pub idle_seconds: Option<u16>,
     /// Laptops: Smart Dimming as (enabled, level), level 0 half, 1 quarter, 2 dark.
     pub smart_dimming: Option<(u8, u8)>,
+    /// A Blade's embedded controller: performance, boost, fans, charge limit.
+    pub laptop: Option<LaptopSim>,
     /// Keyboards: gaming mode bits (`00:08`); `None` where the device has none.
     pub game_mode: Option<u8>,
     pub auto_sleep: Option<bool>,
@@ -135,6 +212,7 @@ impl SimState {
             macro_recyclable: 0,
             idle_seconds: None,
             smart_dimming: None,
+            laptop: None,
             game_mode: None,
             auto_sleep: None,
             auto_sleep_saved: None,
@@ -398,6 +476,10 @@ impl SimState {
                     }
                     ok(a[..2].to_vec())
                 }
+                None => (NotSupported, vec![]),
+            },
+            c if c.class == 0x0D || (c.class == 0x07 && c.id & 0x7F == 0x12) => match self.laptop.as_mut() {
+                Some(l) => l.handle(c, a),
                 None => (NotSupported, vec![]),
             },
             c if c == cmd::SMART_DIMMING.get() => match self.smart_dimming {
@@ -911,6 +993,9 @@ pub fn preset(name: &str) -> Option<(Sim, u16)> {
             s.matrix = Some((6, 16, vec![[0; 3]; 6 * 16]));
             // Smart Dimming on, going dark when idle, as in issue #20.
             s.smart_dimming = Some((1, 2));
+            // Its controller as the 2020 Blades behave: Gaming for Performance, the charge
+            // limit only echoed. Untested on a 2021 Blade; it covers the refusals.
+            s.laptop = Some(LaptopSim::base_2020());
             (Sim::new(s), 0x026D)
         }
         // Base Station V2 Chroma, issue #6.
@@ -1000,6 +1085,7 @@ pub fn preset(name: &str) -> Option<(Sim, u16)> {
             s.leds = vec![5, 4];
             s.matrix = Some((6, 17, vec![[0; 3]; 6 * 17]));
             s.smart_dimming = Some((0, 0));
+            s.laptop = Some(LaptopSim::modern());
             (Sim::new(s), 0x02C6)
         }
         _ => return None,
@@ -1684,6 +1770,61 @@ mod tests {
         // Only laptops have it.
         let mouse = open(&Sim::mouse(), MOUSE_PID);
         assert_eq!(mouse.dimming().unwrap(), None);
+    }
+
+    #[test]
+    fn blade_performance_mode_boost_and_charge_limit_read_back() {
+        use crate::laptop::{Power, PowerMode};
+        let (sim, pid) = preset("blade-16").unwrap();
+        let db = crate::db::Db::builtin().unwrap();
+        let dev = sim.open(pid, db.get(pid).cloned()).unwrap();
+        assert_eq!(dev.power_mode().unwrap(), Some(PowerMode::Balanced));
+        for mode in PowerMode::ALL {
+            dev.set_power(Power { mode, boost: None }).unwrap();
+            assert_eq!(dev.power_mode().unwrap(), Some(mode));
+        }
+        assert_eq!(sim.state().laptop.as_ref().unwrap().modes, [4, 4], "both zones written");
+        dev.set_power("custom:3:2".parse().unwrap()).unwrap();
+        assert_eq!(dev.power().unwrap().unwrap().to_string(), "custom:3:2");
+        // Boost is never sent outside Custom.
+        dev.set_power("silent".parse().unwrap()).unwrap();
+        assert!(dev.set_boost(1, 1).is_err());
+        assert_eq!(sim.state().laptop.as_ref().unwrap().boost, [3, 2]);
+
+        assert_eq!(dev.charge_limit().unwrap(), Some(100));
+        dev.set_charge_limit(80).unwrap();
+        assert_eq!(dev.charge_limit().unwrap(), Some(80));
+        assert_eq!(sim.state().laptop.as_ref().unwrap().charge, Some(0x80 | 80));
+        dev.set_charge_limit(100).unwrap();
+        assert_eq!(sim.state().laptop.as_ref().unwrap().charge, Some(0x50));
+        assert!(dev.set_charge_limit(40).is_err());
+
+        let s = dev.laptop_sensors().unwrap();
+        assert_eq!((s.fans, s.cpu_temp, s.gpu_temp), (vec![2200, 2400], Some(48), Some(44)));
+    }
+
+    #[test]
+    fn a_2020_blade_gets_gaming_and_no_charge_limit_it_cant_keep() {
+        use crate::laptop::{Power, PowerMode};
+        let (sim, pid) = preset("blade").unwrap();
+        let db = crate::db::Db::builtin().unwrap();
+        let dev = sim.open(pid, db.get(pid).cloned()).unwrap();
+        // Performance is 2 on newer Blades; this one keeps only 1 (Gaming).
+        dev.set_power(Power { mode: PowerMode::Performance, boost: None }).unwrap();
+        assert_eq!(sim.state().laptop.as_ref().unwrap().modes, [1, 1]);
+        assert_eq!(dev.power_mode().unwrap(), Some(PowerMode::Performance));
+        // It echoes the charge limit without keeping it: offered as "none", refused on set.
+        assert_eq!(dev.charge_limit().unwrap(), Some(100));
+        let err = dev.set_charge_limit(80).unwrap_err().to_string();
+        assert!(err.contains("didn't keep"), "{err}");
+        // No fan speeds, temperatures only.
+        let s = dev.laptop_sensors().unwrap();
+        assert!(s.fans.is_empty() && s.cpu_temp == Some(48));
+        // Not a laptop: nothing to show, nothing sent.
+        let mouse = open(&Sim::mouse(), MOUSE_PID);
+        assert_eq!(mouse.power_mode().unwrap(), None);
+        assert_eq!(mouse.charge_limit().unwrap(), None);
+        assert!(mouse.set_power("balanced".parse().unwrap()).is_err());
     }
 
     #[test]

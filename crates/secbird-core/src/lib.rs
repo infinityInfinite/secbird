@@ -22,6 +22,7 @@ pub mod firmware;
 pub mod hid_descriptor;
 pub mod features;
 pub mod headset;
+pub mod laptop;
 pub mod log;
 pub mod macros;
 pub mod net;
