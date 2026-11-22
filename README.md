@@ -341,3 +341,5 @@ project; see [NOTICE](NOTICE). Razer, Synapse and Chroma are trademarks of Razer
 is not affiliated with or endorsed by Razer.
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
+How releases are built and signed, and what the app sends over the network: [code signing policy](CODE_SIGNING_POLICY.md).

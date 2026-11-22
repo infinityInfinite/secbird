@@ -54,10 +54,69 @@ jobs:
       - run: cargo test --release
       - run: cargo build --release
 
+      # Code signing through SignPath Foundation (see CODE_SIGNING_POLICY.md). Skipped until the
+      # repository variable SIGNPATH_ORGANIZATION_ID and the secret SIGNPATH_API_TOKEN are set.
+      # The exes are signed first so the installer packs signed copies, then the installer itself.
+      - name: Upload exes for signing
+        id: upload-exes
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exes
+          path: |
+            target/release/secbird-tray.exe
+            target/release/secbird.exe
+          if-no-files-found: error
+
+      - name: Sign exes
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: secbird
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: exes
+          github-artifact-id: ${{ steps.upload-exes.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/exes
+
+      - name: Use the signed exes
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        run: cp signed/exes/secbird-tray.exe signed/exes/secbird.exe target/release/
+
       - name: Installer
         run: |
           choco install innosetup --no-progress -y
           "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //Qp "//DAppVersion=$VERSION" installer/secbird.iss
+
+      - name: Upload installer for signing
+        id: upload-installer
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: target/installer/Secretarybird-Setup-${{ env.VERSION }}.exe
+          if-no-files-found: error
+
+      - name: Sign installer
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: secbird
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/installer
+
+      - name: Use the signed installer
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        run: cp "signed/installer/Secretarybird-Setup-$VERSION.exe" target/installer/
 
       - uses: actions/download-artifact@v4
         with:
@@ -77,6 +136,9 @@ jobs:
         run: |
           awk -v h="## [${VERSION%%-*}]" 'index($0, h) == 1 {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "See CHANGELOG.md" > notes.md
+          if [ -n "${{ vars.SIGNPATH_ORGANIZATION_ID }}" ]; then
+            printf '\n---\nFree code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).\n' >> notes.md
+          fi
 
       - name: Draft release
         env:

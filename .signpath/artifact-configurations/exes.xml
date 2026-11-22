@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paste into SignPath as artifact configuration "exes".
+     Input: the GitHub artifact "unsigned-exes" (secbird-tray.exe and secbird.exe at the root). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="secbird-tray.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="secbird.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
