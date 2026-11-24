@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: read  # SignPath downloads the unsigned artifacts with this job's token
 
 jobs:
   # The CLI for Linux: one static binary (musl), so it runs on any x86_64 distribution.
