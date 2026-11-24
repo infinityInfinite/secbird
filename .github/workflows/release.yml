@@ -69,6 +69,21 @@ jobs:
             target/release/secbird.exe
           if-no-files-found: error
 
+      # GitHub lists a new artifact on the run a moment after the upload finishes, and SignPath
+      # rejects the request if it looks before then. Wait until the run lists it.
+      - name: Wait for the exes artifact to be listed
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ID: ${{ steps.upload-exes.outputs.artifact-id }}
+        run: |
+          for i in $(seq 1 40); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '.artifacts[].id' | grep -qx "$ID" && exit 0
+            sleep 3
+          done
+          echo "Artifact $ID never appeared on the run"; exit 1
+
       - name: Sign exes
         if: vars.SIGNPATH_ORGANIZATION_ID != ''
         uses: signpath/github-action-submit-signing-request@v2
@@ -100,6 +115,21 @@ jobs:
           name: unsigned-installer
           path: target/installer/Secretarybird-Setup-${{ env.VERSION }}.exe
           if-no-files-found: error
+
+      # GitHub lists a new artifact on the run a moment after the upload finishes, and SignPath
+      # rejects the request if it looks before then. Wait until the run lists it.
+      - name: Wait for the installer artifact to be listed
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ID: ${{ steps.upload-installer.outputs.artifact-id }}
+        run: |
+          for i in $(seq 1 40); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '.artifacts[].id' | grep -qx "$ID" && exit 0
+            sleep 3
+          done
+          echo "Artifact $ID never appeared on the run"; exit 1
 
       - name: Sign installer
         if: vars.SIGNPATH_ORGANIZATION_ID != ''
