@@ -75,7 +75,7 @@ jobs:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           project-slug: secbird
-          signing-policy-slug: release-signing
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}
           artifact-configuration-slug: exes
           github-artifact-id: ${{ steps.upload-exes.outputs.artifact-id }}
           wait-for-completion: true
@@ -107,7 +107,7 @@ jobs:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
           project-slug: secbird
-          signing-policy-slug: release-signing
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}
           artifact-configuration-slug: installer
           github-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
           wait-for-completion: true
