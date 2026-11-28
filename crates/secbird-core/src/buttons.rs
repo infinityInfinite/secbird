@@ -729,7 +729,7 @@ impl FromStr for Action {
 impl Device {
     fn read_input(&self, slot: u8, input: Input, layer: Layer) -> Result<Action> {
         let (command, size, id) = input.command();
-        let r = self.get(command, size, &[slot, id, layer as u8])?;
+        let r = self.get_echo(command, size, &[slot, id, layer as u8], 3)?;
         let a = r.args();
         Ok(Action::decode(a[3], [a[5], a[6], a[7], a[8], a[9]]))
     }
@@ -748,14 +748,15 @@ impl Device {
     /// Set a button or key in the live slot. Returns whether anything was sent: an
     /// unchanged one is left alone.
     pub fn set_input(&self, input: Input, layer: Layer, action: Action) -> Result<bool> {
-        if self.input(input, layer).ok() == Some(action) {
-            return Ok(false);
-        }
         let (command, size, id) = input.command();
         let (function, data_size, data) = action.encode();
+        let expected = Action::decode(function, data);
+        if self.input(input, layer).ok() == Some(expected) {
+            return Ok(false);
+        }
         let mut args = vec![cmd::BUTTON_LIVE_SLOT, id, layer as u8, function, data_size];
         args.extend_from_slice(&data);
-        self.transact(command, size, &args)?;
+        self.transact_echo(command, size, &args, 3)?;
         Ok(true)
     }
 
@@ -766,20 +767,35 @@ impl Device {
 
     /// Write a button or key into on-board slot `slot` (1-5), which the device keeps
     /// without any software ("Save to mouse"). A flash write: only on request, never on a
-    /// profile switch.
+    /// profile switch. Reads back to verify, retrying if the flash write didn't stick.
     pub fn set_slot_input(&self, slot: u8, input: Input, layer: Layer, action: Action) -> Result<()> {
         if !(1..=5).contains(&slot) {
             return Err(Error::InvalidArg(format!("on-board slot {slot}: use 1 to 5")));
         }
-        if self.slot_input(slot, input, layer).ok() == Some(action) {
-            return Ok(());
-        }
         let (command, size, id) = input.command();
         let (function, data_size, data) = action.encode();
+        let expected = Action::decode(function, data);
+        if self.slot_input(slot, input, layer).ok() == Some(expected) {
+            return Ok(());
+        }
         let mut args = vec![slot, id, layer as u8, function, data_size];
         args.extend_from_slice(&data);
-        self.transact_slow(command, size, &args)?;
-        Ok(())
+        // Flash writes can acknowledge without persisting (as seen on macro writes) or
+        // receive a stale reply on wireless receivers; echo-match and read back to verify.
+        let mut got = None;
+        for _ in 0..3 {
+            self.transact_slow_echo(command, size, &args, 3)?;
+            let back = self.slot_input(slot, input, layer)?;
+            if back == expected {
+                return Ok(());
+            }
+            got = Some(back);
+        }
+        Err(Error::Unsupported(format!(
+            "the device didn't keep {} in on-board slot {slot} (wrote {expected}, read {})",
+            input.name(),
+            got.map_or_else(|| "nothing".into(), |a| a.to_string()),
+        )))
     }
 
     /// Put a button or key back to its saved-slot setting.

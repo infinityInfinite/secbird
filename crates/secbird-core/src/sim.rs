@@ -2407,4 +2407,200 @@ mod tests {
         store.for_device(&da).active_mut().dpi = Some((400, 400));
         assert_eq!(store.for_device(&db).active().dpi, None);
     }
+
+    /// A transport wrapper that injects one stale `02:8C` reply (from the live slot) before
+    /// letting the real reply through, modelling a wireless receiver returning a cached reply.
+    struct StaleButtonReply {
+        inner: Sim,
+        stale: Mutex<Option<[u8; REPORT_LEN]>>,
+        injected: Mutex<bool>,
+    }
+
+    impl Transport for StaleButtonReply {
+        fn send_feature_report(&self, data: &[u8]) -> Result<()> {
+            let cmd = Command::new(data[7], data[8]);
+            // Trigger once when reading slot 1 of button 5 (Normal layer).
+            if cmd == cmd::BUTTON.get() && data[9] == 1 && data[10] == 5 && data[11] == 0 {
+                let mut done = self.injected.lock().unwrap();
+                if !*done {
+                    *done = true;
+                    // Stale reply for live slot (0), button 5, Normal layer, holding key:f13.
+                    let mut b = [0u8; REPORT_LEN];
+                    b[0] = 2; // Status::Success
+                    b[1] = data[2];
+                    b[5] = cmd::BUTTON_SIZE;
+                    b[6] = cmd.class;
+                    b[7] = cmd.id;
+                    b[8..18].copy_from_slice(&[0, 5, 0, 2, 1, 0, 0x68, 0, 0, 0]);
+                    b[88] = checksum(&b);
+                    *self.stale.lock().unwrap() = Some(b);
+                }
+            }
+            self.inner.send_feature_report(data)
+        }
+
+        fn get_feature_report(&self, buf: &mut [u8]) -> Result<usize> {
+            if let Some(stale) = self.stale.lock().unwrap().take() {
+                buf[0] = 0;
+                buf[1..=REPORT_LEN].copy_from_slice(&stale);
+                return Ok(REPORT_LEN + 1);
+            }
+            self.inner.get_feature_report(buf)
+        }
+
+        fn read_delay(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn save_to_mouse_ignores_stale_button_replies() {
+        use crate::buttons::{Action, Layer};
+        let sim = Sim::mouse();
+        let factory = Action::Mouse(5);
+        let f13 = Action::Key { modifiers: 0, usage: 0x68 };
+        let transport = StaleButtonReply {
+            inner: sim.clone(),
+            stale: Mutex::new(None),
+            injected: Mutex::new(false),
+        };
+        let dev = Device::open(
+            Box::new(transport),
+            MOUSE_PID,
+            0,
+            CString::new("sim:stale").unwrap(),
+            &TXID_CANDIDATES,
+            Sim::spec_for(MOUSE_PID),
+        )
+        .expect("wrapper opens");
+        let path = std::env::temp_dir().join(format!("secbird-stale-btn-{}.json", std::process::id()));
+        let mut store = crate::Store::load(&path).unwrap();
+        crate::actions::set_button(&dev, &mut store, "side-forward", Layer::Normal, Some(f13)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_mouse(&dev, &mut store).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 5, Layer::Normal).unwrap(), f13);
+        let save = store.for_device(&dev).onboard.as_ref().unwrap();
+        assert_eq!(save.before["side-forward"], factory.to_string());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A transport wrapper that acknowledges `drop_writes` on-board `02:0C` writes with
+    /// `Status::Success` without persisting them to `Sim`.
+    struct FlakySlotFlash {
+        inner: Sim,
+        drop_writes: Mutex<u32>,
+        fake_ok: Mutex<Option<[u8; REPORT_LEN]>>,
+    }
+
+    impl Transport for FlakySlotFlash {
+        fn send_feature_report(&self, data: &[u8]) -> Result<()> {
+            let cmd = Command::new(data[7], data[8]);
+            if cmd == cmd::BUTTON && data[9] >= 1 {
+                let mut remaining = self.drop_writes.lock().unwrap();
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    let mut b = [0u8; REPORT_LEN];
+                    b.copy_from_slice(&data[1..=REPORT_LEN]);
+                    b[0] = 2; // Status::Success
+                    b[88] = checksum(&b);
+                    *self.fake_ok.lock().unwrap() = Some(b);
+                    return Ok(());
+                }
+            }
+            self.inner.send_feature_report(data)
+        }
+
+        fn get_feature_report(&self, buf: &mut [u8]) -> Result<usize> {
+            if let Some(rep) = self.fake_ok.lock().unwrap().take() {
+                buf[0] = 0;
+                buf[1..=REPORT_LEN].copy_from_slice(&rep);
+                return Ok(REPORT_LEN + 1);
+            }
+            self.inner.get_feature_report(buf)
+        }
+
+        fn read_delay(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn save_to_mouse_retries_dropped_flash_writes_and_reports_unkept_slots() {
+        use crate::buttons::{Action, Layer};
+        let f13 = Action::Key { modifiers: 0, usage: 0x68 };
+
+        // One silently dropped flash write is caught by read-back and succeeds on retry.
+        let sim = Sim::mouse();
+        let dev = Device::open(
+            Box::new(FlakySlotFlash {
+                inner: sim.clone(),
+                drop_writes: Mutex::new(1),
+                fake_ok: Mutex::new(None),
+            }),
+            MOUSE_PID,
+            0,
+            CString::new("sim:flaky1").unwrap(),
+            &TXID_CANDIDATES,
+            Sim::spec_for(MOUSE_PID),
+        )
+        .unwrap();
+        dev.set_slot_button(1, 5, Layer::Normal, f13).unwrap();
+        assert_eq!(dev.slot_button(1, 5, Layer::Normal).unwrap(), f13);
+
+        // Permanently ignored flash writes surface an error instead of silently succeeding.
+        let sim2 = Sim::mouse();
+        let dev2 = Device::open(
+            Box::new(FlakySlotFlash {
+                inner: sim2,
+                drop_writes: Mutex::new(10),
+                fake_ok: Mutex::new(None),
+            }),
+            MOUSE_PID,
+            0,
+            CString::new("sim:flaky10").unwrap(),
+            &TXID_CANDIDATES,
+            Sim::spec_for(MOUSE_PID),
+        )
+        .unwrap();
+        let err = dev2.set_slot_button(1, 5, Layer::Normal, f13).unwrap_err().to_string();
+        assert!(err.contains("didn't keep"), "{err}");
+    }
+
+    #[test]
+    fn naga_v3_pro_button_ids_and_save_to_mouse() {
+        use crate::buttons::{button_name, Action, Layer};
+        // Exact 33 button ids from Naga V3 Pro (00E8) `02:84` report (#91).
+        const NAGA_V3_IDS: [u8; 33] = [
+            0x01, 0x02, 0x0B, 0x0C, 0x0E, 0x03, 0x34, 0x35, 0x6A, 0x39, 0x80,
+            0x42, 0x41, 0x40, 0x45, 0x44, 0x43, 0x48, 0x47, 0x46, 0x4B, 0x4A, 0x49,
+            0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x05, 0x04, 0x09, 0x0A,
+        ];
+        let mut s = SimState::new("SIMNAGAV3001");
+        s.dpi = Some((1400, 1400));
+        s.leds = vec![1, 4, 5];
+        s.active_slot = Some(1);
+        let defs: Vec<(u8, u8, [u8; 5])> = NAGA_V3_IDS
+            .iter()
+            .map(|&id| (id, if id == 1 { 1 } else { 2 }, [if id == 1 { 1 } else { 0 }, 0x1E, 0, 0, 0]))
+            .collect();
+        with_buttons(&mut s, &defs);
+        s.button_list = Some(NAGA_V3_IDS.to_vec());
+
+        let db = crate::Db::builtin().unwrap();
+        let dev = Sim::new(s).open(0x00E8, db.spec(0x00E8)).expect("Naga V3 Pro opens");
+        let ids = dev.button_ids().expect("button_ids");
+        assert_eq!(ids.len(), 33);
+        assert!(ids.iter().all(|&id| !button_name(id).starts_with("button-")), "every Naga V3 Pro id is named");
+        assert_eq!(dev.polling_rate().unwrap(), 1000);
+
+        let path = std::env::temp_dir().join(format!("secbird-nagav3-{}.json", std::process::id()));
+        let mut store = crate::Store::load(&path).unwrap();
+        let f13 = Action::Key { modifiers: 0, usage: 0x68 };
+        crate::actions::set_button(&dev, &mut store, "grid-1", Layer::Normal, Some(f13)).unwrap();
+        crate::actions::set_button(&dev, &mut store, "side-extra", Layer::Normal, Some(f13)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_mouse(&dev, &mut store).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), f13);
+        assert_eq!(dev.slot_button(1, 0x80, Layer::Normal).unwrap(), f13);
+        assert_eq!(crate::actions::put_back_onboard(&dev, &mut store).unwrap(), 2);
+        let _ = std::fs::remove_file(&path);
+    }
 }

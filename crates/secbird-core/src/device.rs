@@ -191,6 +191,19 @@ impl Device {
         transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES, false, &[])
     }
 
+    /// [`Device::transact_slow`] that only takes a reply echoing `args[..echo]`.
+    pub(crate) fn transact_slow_echo(&self, command: Command, size: u8, args: &[u8], echo: usize) -> Result<Report> {
+        let echo = &args[..echo.min(args.len())];
+        let mut result = Err(Error::NoReply(command));
+        for _ in 0..ECHO_SENDS {
+            result = transact(self.transport.as_ref(), self.txid, command, size, args, FLASH_RETRIES, false, echo);
+            if !matches!(result, Err(Error::NoReply(_))) {
+                break;
+            }
+        }
+        result
+    }
+
     /// [`Device::transact`] with another transaction id (see [`DOCK_TXID`]).
     pub fn transact_as(&self, txid: u8, command: Command, size: u8, args: &[u8]) -> Result<Report> {
         transact(self.transport.as_ref(), txid, command, size, args, READ_RETRIES, true, &[])
