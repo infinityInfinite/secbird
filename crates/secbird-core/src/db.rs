@@ -272,6 +272,18 @@ mod tests {
     }
 
     #[test]
+    fn naga_v3_pro_wireless_matches_report() {
+        let db = Db::builtin().unwrap();
+        let spec = db.get(0x00E8).expect("Naga V3 Pro (Wireless)");
+        assert_eq!(spec.interface, Some(3));
+        assert_eq!(spec.txid, Some(0x1F));
+        assert_eq!(spec.polling, Some(Polling::Standard));
+        assert!(spec.wireless);
+        let led_ids: Vec<u8> = spec.leds.iter().map(|l| l.id).collect();
+        assert_eq!(led_ids, [4, 1, 5]);
+    }
+
+    #[test]
     fn builtin_entries_are_sane() {
         let text = BUILTIN;
         let list: Vec<DeviceSpec> = serde_json::from_str(text).unwrap();

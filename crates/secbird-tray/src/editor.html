@@ -1151,7 +1151,9 @@ function sections() {
       has('auto-off') && { key: 'audio:auto-off', label: uiText('Auto power-off') },
     ].filter(Boolean) });
   }
-  s.push({ id: 'profile', name: uiText('Profile'), rows: [{ key: 'apps', label: uiText('Switches with') }] });
+  const profileRows = [{ key: 'apps', label: uiText('Switches with') }];
+  if (dev.kind === 'mouse') profileRows.push({ key: 'profile-onboard', label: uiText('Saved on the mouse') });
+  s.push({ id: 'profile', name: uiText('Profile'), rows: profileRows });
   s.push({ id: 'device', name: uiText('Device'), rows: [{ key: 'device', label: uiText('About this device') }] });
   return s;
 }
@@ -1531,7 +1533,7 @@ function renderCompare() {
   secs.forEach(s => {
     const body = el('tbody');
     body.append(el('tr', { className: 'grp' }, el('th', { colSpan: span, scope: 'rowgroup', textContent: s.name + (s.id === 'buttons' && btnLayer === 'hypershift' ? ' · HyperShift' : '') })));
-    let rowsOf = s.loading ? [{ key: 'loading', label: uiText('Reading buttons…') }] : s.rows.filter(r => !['lighting-control', 'charge', 'fans', 'temps'].includes(r.key));
+    let rowsOf = s.loading ? [{ key: 'loading', label: uiText('Reading buttons…') }] : s.rows.filter(r => !['lighting-control', 'profile-onboard', 'charge', 'fans', 'temps'].includes(r.key));
     // A keyboard has a hundred keys: only those some profile changes.
     if (s.id === 'buttons' && isBoard() && !s.loading) {
       const skey = r => btnLayer === 'normal' ? r.name : r.name + '/hypershift';
@@ -1568,7 +1570,7 @@ function cellValue(key, name) {
   if (key === 'dimming') return dimmingOf(name) || '';
   if (key === 'gaming') return gamingOf(name) || '';
   if (key === 'scroll') return JSON.stringify(scrollOf(name) || '');
-  if (key === 'macros' || key === 'onboard') return 'shared'; // the device's, the same in every profile
+  if (key === 'macros' || key === 'onboard' || key === 'profile-onboard') return 'shared'; // the device's, the same in every profile
   if (key.startsWith('btn:')) {
     const b = (btnData[dev.id] || []).find(x => x.name === key.slice(4)); if (!b) return '';
     const skey = btnLayer === 'normal' ? b.name : b.name + '/hypershift';
@@ -1583,7 +1585,7 @@ const differs = (key, name) => name !== dev.active && cellValue(key, name) !== c
 function cellView(key, name) {
   const p = prof(name), active = name === dev.active;
   if (key === 'lighting-control') return [dev.lighting_control ? 'Secretarybird' : `<span class="unset">${esc(uiText('Not controlled'))}</span>`];
-  if (key === 'onboard') {
+  if (key === 'onboard' || key === 'profile-onboard') {
     const o = onboardData[dev.id];
     if (!o) return [`<span class="unset">${esc(uiText('Not saved'))}</span>`];
     if (o.profile !== name) return [`<span class="unset">${esc(uiText('Not this profile'))}</span>`];
@@ -1719,7 +1721,7 @@ function buildEditor(host, r) {
   else if (r.key === 'fans' || r.key === 'temps') sensorsEditor(box);
   else if (r.key === 'gaming') gamingEditor(box);
   else if (r.key === 'scroll') scrollEditor(box);
-  else if (r.key === 'onboard') onboardEditor(box);
+  else if (r.key === 'onboard' || r.key === 'profile-onboard') onboardEditor(box);
   else if (r.key === 'macros') macrosEditor(box);
   else if (r.key === 'apps') appsEditor(box);
   else if (r.key === 'device') deviceEditor(box);
@@ -3136,7 +3138,8 @@ function onboardEditor(box) {
     : o.profile !== dev.active ? uiText`${o.profile} is saved in on-board slot ${o.slot}. Saving ${dev.active} replaces it.`
     : o.changed ? uiText`${o.profile} was saved in on-board slot ${o.slot} and has changed since. Save again to update the mouse.`
     : uiText`${o.profile} is saved in on-board slot ${o.slot} (${plural(o.count, 'remapped button')}). It works without Secretarybird.`;
-  const done = (r, msg) => { btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; sel = 'onboard'; renderWork(); toast(msg); };
+  const keep = sel;
+  const done = (r, msg) => { btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; sel = keep; renderWork(); toast(msg); };
   const save = el('button', { className: 'ghost', textContent: o && o.profile === dev.active ? uiText('Save again') : uiText('Save ') + dev.active + uiText(' to the mouse'),
     onclick: async e => {
       if (!o && !confirm(uiText`Write ${dev.active}'s button remaps into the mouse's memory? What it holds now is kept, and Put back restores it.`)) return;

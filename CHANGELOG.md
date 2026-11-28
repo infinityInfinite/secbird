@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Command line: `-v` / `--verbose` (or `SECBIRD_TRACE=1`) prints Protocol 2.5 requests and
+  replies to stderr for diagnosing device issues; serial replies are redacted.
+
+### Fixed
+- Naga V3 Pro (Wireless, `00E8`): uses interface 3 and standard polling (`00:85`), matching
+  its device report (`00:C0` returns `NotSupported`, #91).
+- Button remapping and "Save to mouse": reads and writes now require replies to echo the
+  requested `[slot, button]` bytes (avoiding stale replies on wireless receivers while
+  accepting the Naga V3 Pro's `args[2]` reply byte), and on-board slot writes (`02:0C`)
+  are read back and retried up to 3 times, returning an error if the device doesn't keep
+  the assignment.
+
 ## [0.6.1] - 2026-11-21
 
 ### Added
