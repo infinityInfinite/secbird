@@ -729,7 +729,9 @@ impl FromStr for Action {
 impl Device {
     fn read_input(&self, slot: u8, input: Input, layer: Layer) -> Result<Action> {
         let (command, size, id) = input.command();
-        let r = self.get_echo(command, size, &[slot, id, layer as u8], 3)?;
+        // Echo-match [slot, id] only: the Naga V3 Pro (00E8) does not always echo the
+        // layer byte in args[2] of 02:8C replies (observed on hardware).
+        let r = self.get_echo(command, size, &[slot, id, layer as u8], 2)?;
         let a = r.args();
         Ok(Action::decode(a[3], [a[5], a[6], a[7], a[8], a[9]]))
     }
@@ -756,7 +758,7 @@ impl Device {
         }
         let mut args = vec![cmd::BUTTON_LIVE_SLOT, id, layer as u8, function, data_size];
         args.extend_from_slice(&data);
-        self.transact_echo(command, size, &args, 3)?;
+        self.transact_echo(command, size, &args, 2)?;
         Ok(true)
     }
 
@@ -784,7 +786,7 @@ impl Device {
         // receive a stale reply on wireless receivers; echo-match and read back to verify.
         let mut got = None;
         for _ in 0..3 {
-            self.transact_slow_echo(command, size, &args, 3)?;
+            self.transact_slow_echo(command, size, &args, 2)?;
             let back = self.slot_input(slot, input, layer)?;
             if back == expected {
                 return Ok(());

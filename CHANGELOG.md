@@ -10,10 +10,10 @@
 - Naga V3 Pro (Wireless, `00E8`): uses interface 3 and standard polling (`00:85`), matching
   its device report (`00:C0` returns `NotSupported`, #91).
 - Button remapping and "Save to mouse": reads and writes now require replies to echo the
-  requested `[slot, button, layer]` bytes (avoiding stale replies on wireless receivers),
-  and on-board slot writes (`02:0C`) are read back and retried up to 3 times, returning an
-  error if the device doesn't keep the assignment. Verified on simulator; not yet tested on
-  Naga V3 Pro hardware.
+  requested `[slot, button]` bytes (avoiding stale replies on wireless receivers while
+  accepting the Naga V3 Pro's `args[2]` reply byte), and on-board slot writes (`02:0C`)
+  are read back and retried up to 3 times, returning an error if the device doesn't keep
+  the assignment.
 
 ## [0.6.1] - 2026-11-21
 
