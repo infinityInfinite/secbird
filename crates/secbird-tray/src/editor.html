@@ -751,7 +751,7 @@ const KINDS = { mouse: uiText('Mouse'), keyboard: uiText('Keyboard'), laptop: ui
   headset: uiText('Headset'), accessory: uiText('Accessory'), unknown: uiText('Device') };
 let devices = [], unsupported = [], synapse = [], dev = null, showAll = null, showStudio = false;
 let sel = null, section = null, view = 'work'; // selected tile, rail section, 'work' or 'compare'
-let btnFailed = {}, btnData = {}, onboardData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
+let btnFailed = {}, btnData = {}, onboardData = {}, onboardSlotsData = {}, maxSlotsData = {}, macroData = {}, btnLayer = 'normal', brush = 'FF2800', painting = false, syncPicked = false;
 
 // Full-size ANSI keyboard on Razer's 6 x 22 per-key grid.
 // Each key: [label, matrix column, width, gap before, height], in key units.
@@ -1151,7 +1151,9 @@ function sections() {
       has('auto-off') && { key: 'audio:auto-off', label: uiText('Auto power-off') },
     ].filter(Boolean) });
   }
-  s.push({ id: 'profile', name: uiText('Profile'), rows: [{ key: 'apps', label: uiText('Switches with') }] });
+  const profileRows = [{ key: 'apps', label: uiText('Switches with') }];
+  if (dev.kind === 'mouse') profileRows.push({ key: 'profile-onboard', label: uiText('Saved on the mouse') });
+  s.push({ id: 'profile', name: uiText('Profile'), rows: profileRows });
   s.push({ id: 'device', name: uiText('Device'), rows: [{ key: 'device', label: uiText('About this device') }] });
   return s;
 }
@@ -1229,7 +1231,7 @@ function renderWork(keepPanel) {
   const cur = secs.find(s => s.id === section);
   if (entering && !sel) sel = autoOpen(cur);
   // Slow reads happen only when their section is open, once per device.
-  if (section === 'buttons') loadButtons(dev);
+  if (section === 'buttons' || (section === 'profile' && dev.kind === 'mouse')) loadButtons(dev);
   if ((section === 'buttons' || section === 'macros') && dev.macros && macroData[dev.id] === undefined) loadMacros(dev);
   if (sel && sectionOf(sel) !== section) sel = null;
   renderRail(secs);
@@ -1531,7 +1533,7 @@ function renderCompare() {
   secs.forEach(s => {
     const body = el('tbody');
     body.append(el('tr', { className: 'grp' }, el('th', { colSpan: span, scope: 'rowgroup', textContent: s.name + (s.id === 'buttons' && btnLayer === 'hypershift' ? ' · HyperShift' : '') })));
-    let rowsOf = s.loading ? [{ key: 'loading', label: uiText('Reading buttons…') }] : s.rows.filter(r => !['lighting-control', 'charge', 'fans', 'temps'].includes(r.key));
+    let rowsOf = s.loading ? [{ key: 'loading', label: uiText('Reading buttons…') }] : s.rows.filter(r => !['lighting-control', 'profile-onboard', 'charge', 'fans', 'temps'].includes(r.key));
     // A keyboard has a hundred keys: only those some profile changes.
     if (s.id === 'buttons' && isBoard() && !s.loading) {
       const skey = r => btnLayer === 'normal' ? r.name : r.name + '/hypershift';
@@ -1568,7 +1570,7 @@ function cellValue(key, name) {
   if (key === 'dimming') return dimmingOf(name) || '';
   if (key === 'gaming') return gamingOf(name) || '';
   if (key === 'scroll') return JSON.stringify(scrollOf(name) || '');
-  if (key === 'macros' || key === 'onboard') return 'shared'; // the device's, the same in every profile
+  if (key === 'macros' || key === 'onboard' || key === 'profile-onboard') return 'shared'; // the device's, the same in every profile
   if (key.startsWith('btn:')) {
     const b = (btnData[dev.id] || []).find(x => x.name === key.slice(4)); if (!b) return '';
     const skey = btnLayer === 'normal' ? b.name : b.name + '/hypershift';
@@ -1583,8 +1585,15 @@ const differs = (key, name) => name !== dev.active && cellValue(key, name) !== c
 function cellView(key, name) {
   const p = prof(name), active = name === dev.active;
   if (key === 'lighting-control') return [dev.lighting_control ? 'Secretarybird' : `<span class="unset">${esc(uiText('Not controlled'))}</span>`];
-  if (key === 'onboard') {
+  if (key === 'onboard' || key === 'profile-onboard') {
+    const slots = onboardSlotsData[dev.id];
     const o = onboardData[dev.id];
+    if (slots && slots.length) {
+      const act = slots.find(s => s.active) || slots[0];
+      const mine = slots.find(s => s.saved && s.saved.profile === name);
+      if (mine) return [esc(uiText('Slot')) + ` <span class="num">${mine.id}</span>` + (mine.saved.changed ? ` · <span class="unset">${esc(uiText('changed since'))}</span>` : '') + (slots.length > 1 ? ` <small>· ${plural(slots.length, 'slot')}</small>` : '')];
+      return [esc(uiText('Slot')) + ` <span class="num">${act.id}</span>` + (slots.length > 1 ? ` <small>· ${plural(slots.length, 'slot')}</small>` : ` · <span class="unset">${esc(uiText('Not saved'))}</span>`)];
+    }
     if (!o) return [`<span class="unset">${esc(uiText('Not saved'))}</span>`];
     if (o.profile !== name) return [`<span class="unset">${esc(uiText('Not this profile'))}</span>`];
     return [esc(uiText('Slot')) + ` <span class="num">${o.slot}</span>` + (o.changed ? ` · <span class="unset">${esc(uiText('changed since'))}</span>` : '')];
@@ -1719,7 +1728,7 @@ function buildEditor(host, r) {
   else if (r.key === 'fans' || r.key === 'temps') sensorsEditor(box);
   else if (r.key === 'gaming') gamingEditor(box);
   else if (r.key === 'scroll') scrollEditor(box);
-  else if (r.key === 'onboard') onboardEditor(box);
+  else if (r.key === 'onboard' || r.key === 'profile-onboard') onboardEditor(box);
   else if (r.key === 'macros') macrosEditor(box);
   else if (r.key === 'apps') appsEditor(box);
   else if (r.key === 'device') deviceEditor(box);
@@ -3128,15 +3137,76 @@ function sensorsEditor(box) {
     el('p', { className: 'note', textContent: uiText('The temperatures come from the laptop’s controller, which sits near the chips, so they read lower than the CPU’s own sensor.') }));
 }
 
-// Save to mouse: the profile's button remaps written into the mouse's on-board slot, so they
-// work without Secretarybird. Remaps are live only until then. Put back undoes it.
+// Save to mouse: manage hardware on-board profile slots (1-5) and write button remaps
+// into any slot so they work without Secretarybird. Remaps are live only until then.
 function onboardEditor(box) {
-  const o = onboardData[dev.id], n = Object.keys(dev.profile.buttons || {}).length;
+  const o = onboardData[dev.id], slots = onboardSlotsData[dev.id], maxSlots = maxSlotsData[dev.id] || 5;
+  const n = Object.keys(dev.profile.buttons || {}).length;
+  const keep = sel;
+  const done = (r, msg) => {
+    btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard;
+    onboardSlotsData[dev.id] = r.onboard_slots || null; maxSlotsData[dev.id] = r.max_slots || 5;
+    sel = keep; renderWork(); toast(msg);
+  };
+  if (slots && slots.length) {
+    const list = el('div', { className: 'edgroup' }, el('h3', { textContent: uiText('On-board profile slots') }));
+    slots.forEach(s => {
+      const title = `Slot ${s.id}` + (s.active ? ' · ' + uiText('Active') : '');
+      const sub = s.saved
+        ? uiText`${s.saved.profile} (${plural(s.saved.count, 'remapped button')})` + (s.saved.changed ? ' · ' + uiText('changed since') : '')
+        : (s.name || uiText('Factory or Synapse settings'));
+      const btns = [];
+      if (!s.active) {
+        btns.push(el('button', { className: 'ghost', textContent: uiText('Switch'), onclick: async e => {
+          e.target.disabled = true;
+          try { done(await api('/api/onboard-slot', { action: 'use', slot: s.id }), uiText`Switched mouse to slot ${s.id}`); }
+          catch (err) { toast(err.message, true); e.target.disabled = false; }
+        } }));
+      }
+      btns.push(el('button', { className: 'ghost', textContent: s.saved && s.saved.profile === dev.active ? uiText('Save again') : uiText`Save ${dev.active} here`, onclick: async e => {
+        if (!s.saved && !confirm(uiText`Write ${dev.active}'s button remaps into on-board slot ${s.id}? What it holds now is kept, and Put back restores it.`)) return;
+        e.target.disabled = true;
+        try { done(await api('/api/save-to-mouse', { slot: s.id }), uiText`${dev.active} saved to slot ${s.id}`); }
+        catch (err) { toast(err.message, true); e.target.disabled = false; }
+      } }));
+      if (s.saved) {
+        btns.push(el('button', { className: 'ghost', textContent: uiText('Put back'), onclick: async e => {
+          e.target.disabled = true;
+          try { done(await api('/api/put-back', { slot: s.id }), uiText`Slot ${s.id} restored`); }
+          catch (err) { toast(err.message, true); e.target.disabled = false; }
+        } }));
+      }
+      if (slots.length > 1) {
+        btns.push(el('button', { className: 'ghost', textContent: uiText('Delete'), onclick: async e => {
+          if (!confirm(uiText`Delete on-board slot ${s.id} from the mouse?`)) return;
+          e.target.disabled = true;
+          try { done(await api('/api/onboard-slot', { action: 'delete', slot: s.id }), uiText`Deleted slot ${s.id}`); }
+          catch (err) { toast(err.message, true); e.target.disabled = false; }
+        } }));
+      }
+      list.append(el('div', { className: 'edgroup' },
+        el('p', {}, el('b', { textContent: title }), ' — ', el('span', { textContent: sub })),
+        el('div', { className: 'row' }, ...btns)));
+    });
+    const used = new Set(slots.map(s => s.id));
+    let next = null;
+    for (let i = 1; i <= maxSlots; i++) { if (!used.has(i)) { next = i; break; } }
+    if (next != null) {
+      list.append(el('div', { className: 'row' }, el('button', { className: 'ghost', innerHTML: icon('plus') + uiText`Add slot ${next}`, onclick: async e => {
+        e.target.disabled = true;
+        try { done(await api('/api/onboard-slot', { action: 'new', slot: next, name: 'Slot ' + next }), uiText`Created on-board slot ${next}`); }
+        catch (err) { toast(err.message, true); e.target.disabled = false; }
+      } })));
+    }
+    box.append(list,
+      el('p', { className: 'note', textContent: uiText('The profile button on the mouse cycles through all created slots without any software running.') }),
+      el('p', { className: 'note', textContent: n ? uiText('Lighting, DPI and the sleep timer are on the mouse already; saving writes this profile’s button remaps to the chosen slot.') : uiText('This profile remaps no buttons, so saving it puts back anything saved before in that slot.') }));
+    return;
+  }
   const status = !o ? uiText('Your button remaps work while Secretarybird is running. Saved on the mouse, they also work on another PC, on Linux or macOS, and before Secretarybird starts.')
     : o.profile !== dev.active ? uiText`${o.profile} is saved in on-board slot ${o.slot}. Saving ${dev.active} replaces it.`
     : o.changed ? uiText`${o.profile} was saved in on-board slot ${o.slot} and has changed since. Save again to update the mouse.`
     : uiText`${o.profile} is saved in on-board slot ${o.slot} (${plural(o.count, 'remapped button')}). It works without Secretarybird.`;
-  const done = (r, msg) => { btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; sel = 'onboard'; renderWork(); toast(msg); };
   const save = el('button', { className: 'ghost', textContent: o && o.profile === dev.active ? uiText('Save again') : uiText('Save ') + dev.active + uiText(' to the mouse'),
     onclick: async e => {
       if (!o && !confirm(uiText`Write ${dev.active}'s button remaps into the mouse's memory? What it holds now is kept, and Put back restores it.`)) return;
@@ -3365,7 +3435,7 @@ async function loadButtons(d, force) {
   if (dev && dev.id === d.id && !showAll) renderSheet();
   try {
     const r = await api('/api/buttons', { id: d.id });
-    btnData[d.id] = r.buttons; onboardData[d.id] = r.onboard; delete btnFailed[d.id];
+    btnData[d.id] = r.buttons; onboardData[d.id] = r.onboard; onboardSlotsData[d.id] = r.onboard_slots || null; maxSlotsData[d.id] = r.max_slots || 5; delete btnFailed[d.id];
   } catch { btnData[d.id] = []; btnFailed[d.id] = true; }
   if (dev && dev.id === d.id && !showAll) renderSheet();
 }
@@ -3537,7 +3607,7 @@ async function macroCall(body, done) {
 async function restoreAllButtons() {
   try {
     const r = await api('/api/buttons-restore', {});
-    btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; dev.profile.buttons = {};
+    btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; onboardSlotsData[dev.id] = r.onboard_slots || null; maxSlotsData[dev.id] = r.max_slots || 5; dev.profile.buttons = {};
     sel = null; renderWork();
     toast(uiText`Every ${isBoard() ? uiText('key') : uiText('button')} is back to what the ${holder()} stores`);
   } catch (err) { toast(err.message, true); }
@@ -3548,8 +3618,8 @@ async function assign(button, action, isUndo) {
   const prev = before && { action: before[layer], remapped: before.remapped[layer] };
   try {
     const r = await api('/api/button', { button, layer: btnLayer, assign: action });
-    btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard;
-    refreshCell('onboard');
+    btnData[dev.id] = r.buttons; onboardData[dev.id] = r.onboard; onboardSlotsData[dev.id] = r.onboard_slots || null; maxSlotsData[dev.id] = r.max_slots || 5;
+    refreshCell('onboard'); refreshCell('profile-onboard');
     const skey = btnLayer === 'normal' ? button : button + '/hypershift';
     dev.profile.buttons = dev.profile.buttons || {};
     if (action) dev.profile.buttons[skey] = action; else delete dev.profile.buttons[skey];

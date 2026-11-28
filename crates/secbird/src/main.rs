@@ -81,9 +81,15 @@ BUTTONS (mice with on-board button memory; add --hypershift for the HyperShift l
   button <button> reset     Back to its saved setting (Synapse's or the factory one)
   button restore-all        Every remapped button back to its saved setting at once
                             (also puts back a save-to-mouse)
-  button save-to-mouse      Write this profile's remaps into the mouse's on-board slot, so
-                            they work without Secretarybird; the slot's old settings are kept
-  button put-back           Put the slot back to what it held before save-to-mouse
+  button save-to-mouse [--slot N]
+                            Write this profile's remaps into an on-board slot (1-5, default
+                            active; creates the slot if needed); the slot's old settings are kept
+  button put-back [--slot N]
+                            Put the slot back to what it held before save-to-mouse
+  slot [list]               Hardware on-board profile slots on the device (* = active)
+  slot new <1-5> [name]     Create a hardware on-board profile slot (for the profile button)
+  slot use <1-5>            Switch the active hardware on-board profile slot
+  slot delete <1-5>         Delete a hardware on-board profile slot (cannot delete the last one)
   Actions: left right middle back forward scroll-up scroll-down scroll-left scroll-right
            double-click  key:<combo> (key:a, key:ctrl+shift+f13, key:space)
            turbo:<button or key:..>[@presses-per-second]  (turbo:left@15)
@@ -135,6 +141,7 @@ UPDATES:
 
 OPTIONS:
   -V       Show the version (also --version)
+  -v       Print Protocol 2.5 requests and replies to stderr (also --verbose, SECBIRD_TRACE=1)
   -d ID    Pick a device by USB product id (0099) or serial, when several are connected
 
 Set SECBIRD_SIM=all (or a list: mouse,wireless,keyboard,old-keyboard,naga,cobra,dock,blackwidow,
@@ -154,6 +161,10 @@ fn main() -> ExitCode {
 }
 
 fn run(mut args: Vec<String>) -> Result<(), Error> {
+    if let Some(i) = args.iter().position(|a| matches!(a.as_str(), "-v" | "--verbose")) {
+        secbird_core::device::set_trace(true);
+        args.remove(i);
+    }
     // -d takes a product id (0099), a device key (0099:AB1234C56789012) or a serial.
     let mut selector: Option<String> = None;
     if let Some(i) = args.iter().position(|a| a == "-d") {
@@ -521,6 +532,7 @@ Note: Razer Synapse is running ({}). It can overwrite these settings;", synapse.
         },
         "scroll" => scroll_cmd(dev, &mut store, rest),
         "macro" => macro_cmd(dev, &mut store, rest),
+        "slot" => slot_cmd(dev, &mut store, rest),
         "poll" => match rest.first() {
             None => {
                 println!("{} Hz", dev.polling_rate()?);
@@ -840,10 +852,80 @@ fn macro_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Err
     }
 }
 
+fn slot_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
+    let parse_slot = |s: &str| -> Result<u8, Error> {
+        let n: u8 = s.parse().map_err(|_| Error::InvalidArg(format!("bad slot '{s}': use 1 to {}", dev.max_onboard_slots())))?;
+        if !(1..=dev.max_onboard_slots()).contains(&n) {
+            return Err(Error::InvalidArg(format!("on-board slot {n}: use 1 to {}", dev.max_onboard_slots())));
+        }
+        Ok(n)
+    };
+    let args: Vec<&str> = rest.iter().map(String::as_str).collect();
+    match args.as_slice() {
+        [] | ["list"] => {
+            let slots = dev.onboard_slots()?;
+            let profiles = store.for_device(dev);
+            if slots.is_empty() {
+                println!("No on-board slots reported.");
+                return Ok(());
+            }
+            for s in slots {
+                let mark = if s.active { "*" } else { " " };
+                let name = if s.name.is_empty() { "(unnamed)" } else { &s.name };
+                let saved = profiles
+                    .onboard_save(s.id)
+                    .map(|o| format!("  [saved: {}, {} button(s)]", o.profile, o.buttons.len()))
+                    .unwrap_or_default();
+                println!("  {mark} Slot {}  {name}{saved}", s.id);
+            }
+            Ok(())
+        }
+        ["new", slot, name @ ..] => {
+            let id = parse_slot(slot)?;
+            let label = name.join(" ");
+            let label_opt = (!label.trim().is_empty()).then_some(label.as_str());
+            dev.create_onboard_slot(id, label_opt)?;
+            println!("Created on-board slot {id}{}", label_opt.map(|n| format!(" ({n})")).unwrap_or_default());
+            Ok(())
+        }
+        ["use", slot] => {
+            let id = parse_slot(slot)?;
+            dev.set_active_onboard_slot(id)?;
+            println!("Active on-board slot is now {id}");
+            Ok(())
+        }
+        ["delete", slot] => {
+            let id = parse_slot(slot)?;
+            dev.delete_onboard_slot(id)?;
+            store.for_device(dev).remove_onboard_save(id);
+            store.save()?;
+            println!("Deleted on-board slot {id}");
+            Ok(())
+        }
+        _ => Err(Error::InvalidArg("usage: slot [list] | slot new <1-5> [name] | slot use <1-5> | slot delete <1-5>".into())),
+    }
+}
+
 fn button_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Error> {
     use secbird_core::buttons::{button_id, button_label, button_name, Layer};
     let layer = if rest.iter().any(|a| a == "--hypershift") { Layer::HyperShift } else { Layer::Normal };
-    let args: Vec<&str> = rest.iter().map(String::as_str).filter(|a| *a != "--hypershift").collect();
+    let mut slot_arg: Option<u8> = None;
+    let mut args: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < rest.len() {
+        if rest[i] == "--hypershift" {
+            i += 1;
+            continue;
+        }
+        if rest[i] == "--slot" {
+            let v = rest.get(i + 1).ok_or_else(|| Error::InvalidArg("--slot needs a number (1-5)".into()))?;
+            slot_arg = Some(v.parse().map_err(|_| Error::InvalidArg(format!("bad slot '{v}'")))?);
+            i += 2;
+            continue;
+        }
+        args.push(rest[i].as_str());
+        i += 1;
+    }
     match args.as_slice() {
         [] | ["list"] => {
             let buttons = dev.buttons();
@@ -866,13 +948,19 @@ fn button_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Er
             Ok(())
         }
         ["save-to-mouse"] => {
-            let slot = actions::save_buttons_to_mouse(dev, store)?;
+            let slot = match slot_arg {
+                Some(s) => actions::save_buttons_to_slot(dev, store, s)?,
+                None => actions::save_buttons_to_mouse(dev, store)?,
+            };
             let n = store.for_device(dev).active().buttons.len();
-            println!("Saved {n} remapped button(s) in on-board slot {slot}; `secbird button put-back` undoes it.");
+            println!("Saved {n} remapped button(s) in on-board slot {slot}; `secbird button put-back --slot {slot}` undoes it.");
             Ok(())
         }
         ["put-back"] => {
-            let n = actions::put_back_onboard(dev, store)?;
+            let n = match slot_arg {
+                Some(s) => actions::put_back_slot(dev, store, s)?,
+                None => actions::put_back_onboard(dev, store)?,
+            };
             println!("Put {n} button(s) in the mouse's slot back to what they were.");
             Ok(())
         }
@@ -889,7 +977,7 @@ fn button_cmd(dev: &Device, store: &mut Store, rest: &[String]) -> Result<(), Er
             println!("{button}{on} now does {action}");
             Ok(())
         }
-        _ => Err(Error::InvalidArg("usage: button [list|restore-all|save-to-mouse|put-back] | button <button> <action|reset> [--hypershift]".into())),
+        _ => Err(Error::InvalidArg("usage: button [list|restore-all|save-to-mouse [--slot N]|put-back [--slot N]] | button <button> <action|reset> [--hypershift]".into())),
     }
 }
 
@@ -1160,6 +1248,13 @@ fn info(dev: &Device, store: &mut Store) -> Result<(), Error> {
         }
         if let Some(m) = spec.matrix {
             println!("Per-key   {} rows x {} columns", m.rows, m.cols);
+        }
+    }
+    if let Ok(ids) = dev.onboard_slot_ids() {
+        if !ids.is_empty() {
+            let active = dev.active_onboard_slot().unwrap_or(1);
+            let list: Vec<String> = ids.iter().map(u8::to_string).collect();
+            println!("Slots     {} (slot {active} active, max {})", list.join(", "), dev.max_onboard_slots());
         }
     }
     println!("Profile   {}", store.for_device(dev).active);

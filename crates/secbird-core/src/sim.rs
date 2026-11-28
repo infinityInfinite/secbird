@@ -156,6 +156,10 @@ pub struct SimState {
     /// Active on-board slot (`05:84`), when set. Lighting written to another slot is kept
     /// but not shown, like the DeathStalker V2 Pro in #37.
     pub active_slot: Option<u8>,
+    /// On-board profile slots (`05:*`): slot id (1-5) -> 250-byte header. `None` = no multi-slot support.
+    pub onboard_slots: Option<BTreeMap<u8, Vec<u8>>>,
+    /// Indicator LED colors for on-board slots (`05:0C`/`05:8C`).
+    pub onboard_colors: BTreeMap<u8, [u8; 3]>,
     /// On-device macro memory (`None` = no macros): id -> (header, steps). Sized like a Basilisk V3.
     pub macros: Option<BTreeMap<u16, SimMacro>>,
     /// Bytes freed by deleted macros, not reusable until the memory is compacted.
@@ -217,6 +221,8 @@ impl SimState {
             auto_sleep: None,
             auto_sleep_saved: None,
             active_slot: None,
+            onboard_slots: None,
+            onboard_colors: BTreeMap::new(),
             paired: Vec::new(),
             dock_light: None,
             battery: None,
@@ -258,6 +264,128 @@ impl SimState {
 
     fn hidden_slot(&self, store: u8) -> bool {
         store != 0 && self.active_slot.is_some_and(|slot| slot != store)
+    }
+
+    /// On-board profile slot commands (class 05, from Synapse 4's `obmEngine`).
+    fn handle_onboard(&mut self, c: Command, a: &[u8], size: u8) -> (Status, Vec<u8>) {
+        use Status::{Failed, NotSupported, Success};
+        let ok = |v: Vec<u8>| (Success, v);
+        if self.onboard_slots.is_none() {
+            return if c == cmd::ACTIVE_SLOT.get() {
+                match (self.active_slot, self.buttons.is_empty()) {
+                    (Some(slot), _) => ok(vec![slot]),
+                    (None, true) => (NotSupported, vec![]),
+                    (None, false) => ok(vec![1]),
+                }
+            } else {
+                (NotSupported, vec![])
+            };
+        }
+        match c {
+            c if c == cmd::PROFILE_COUNT.get() => {
+                let n = self.onboard_slots.as_ref().map_or(0, BTreeMap::len) as u8;
+                ok(vec![n])
+            }
+            c if c == cmd::PROFILE_IDS.get() => {
+                let slots = self.onboard_slots.as_ref().unwrap();
+                let mut v = vec![slots.len() as u8];
+                v.extend(slots.keys().copied());
+                ok(v)
+            }
+            cmd::PROFILE_CREATE => {
+                let slot = a[0];
+                if !(1..=cmd::MAX_ONBOARD_SLOTS).contains(&slot) {
+                    return (Failed, vec![]);
+                }
+                let slots = self.onboard_slots.as_mut().unwrap();
+                slots.entry(slot).or_insert_with(|| vec![0u8; cmd::PROFILE_HEADER_LEN]);
+                // Initialize new slot buttons from slot 1 defaults when missing.
+                let defaults: Vec<_> = self
+                    .buttons
+                    .iter()
+                    .filter(|((s, _, _), _)| *s == 1)
+                    .map(|((_, id, layer), &val)| ((*id, *layer), val))
+                    .collect();
+                for ((id, layer), val) in defaults {
+                    self.buttons.entry((slot, id, layer)).or_insert(val);
+                }
+                ok(vec![slot])
+            }
+            cmd::PROFILE_DELETE => {
+                let slot = a[0];
+                let slots = self.onboard_slots.as_mut().unwrap();
+                if !slots.contains_key(&slot) || slots.len() <= 1 {
+                    return (Failed, vec![]);
+                }
+                slots.remove(&slot);
+                self.onboard_colors.remove(&slot);
+                self.buttons.retain(|(s, _, _), _| *s != slot);
+                if self.active_slot == Some(slot) {
+                    self.active_slot = slots.keys().next().copied();
+                }
+                ok(vec![slot])
+            }
+            c if c == cmd::ACTIVE_SLOT.get() => ok(vec![self.active_slot.unwrap_or(1)]),
+            cmd::ACTIVE_SLOT => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                self.active_slot = Some(slot);
+                ok(vec![slot])
+            }
+            c if c == cmd::PROFILE_NAME.get() => {
+                let slot = a[0];
+                let off = u16::from_be_bytes([a[1], a[2]]) as usize;
+                let n = (size as usize).saturating_sub(5);
+                let Some(head) = self.onboard_slots.as_ref().unwrap().get(&slot) else {
+                    return (Failed, vec![]);
+                };
+                if off + n > head.len() {
+                    return (Failed, vec![]);
+                }
+                let mut v = vec![slot, a[1], a[2], a[3], a[4]];
+                v.extend_from_slice(&head[off..off + n]);
+                ok(v)
+            }
+            cmd::PROFILE_NAME => {
+                let slot = a[0];
+                let off = u16::from_be_bytes([a[1], a[2]]) as usize;
+                let n = (size as usize).saturating_sub(5);
+                let Some(head) = self.onboard_slots.as_mut().unwrap().get_mut(&slot) else {
+                    return (Failed, vec![]);
+                };
+                if off + n > head.len() {
+                    return (Failed, vec![]);
+                }
+                head[off..off + n].copy_from_slice(&a[5..5 + n]);
+                ok(a[..size as usize].to_vec())
+            }
+            cmd::PROFILE_RESET => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                ok(vec![slot])
+            }
+            c if c == cmd::PROFILE_COLOR.get() => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                let [r, g, b] = self.onboard_colors.get(&slot).copied().unwrap_or([0xFF, 0xFF, 0xFF]);
+                ok(vec![slot, r, g, b])
+            }
+            cmd::PROFILE_COLOR => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                self.onboard_colors.insert(slot, [a[1], a[2], a[3]]);
+                ok(a[..4].to_vec())
+            }
+            _ => (NotSupported, vec![]),
+        }
     }
 
     /// Macro memory commands, like the Basilisk V3: ids 1-100, 90 KB.
@@ -416,11 +544,7 @@ impl SimState {
                 let ids = self.keys.keys().filter(|k| k.0 == a[0] && k.2 == a[1]).map(|k| k.1);
                 ok([a[0], a[1]].into_iter().chain(ids).collect())
             }
-            c if c == cmd::ACTIVE_SLOT.get() => match (self.active_slot, self.buttons.is_empty()) {
-                (Some(slot), _) => ok(vec![slot]),
-                (None, true) => (NotSupported, vec![]),
-                (None, false) => ok(vec![1]),
-            },
+            c if c.class == 0x05 => self.handle_onboard(c, a, size),
             c if c == cmd::POLLING.get() => ok(vec![self.polling_code]),
             cmd::POLLING => {
                 if cmd::polling_hz(a[0]).is_none() {
@@ -684,6 +808,8 @@ impl Sim {
         s.dpi = Some((800, 800));
         s.dpi_stages = Some((2, vec![(400, 400), (800, 800), (1000, 1000), (1300, 1300), (6400, 6400)]));
         s.macros = Some(BTreeMap::new());
+        s.active_slot = Some(1);
+        s.onboard_slots = Some(BTreeMap::from([(1, vec![0u8; cmd::PROFILE_HEADER_LEN])]));
         s.leds = vec![1, 4, 10];
         // The Basilisk V3's factory buttons, as read from the real mouse, in the live
         // slot and the active saved slot, both layers.
@@ -728,6 +854,8 @@ impl Sim {
         s.idle_seconds = Some(180);
         s.auto_sleep = Some(true);
         s.macros = Some(BTreeMap::new());
+        s.active_slot = Some(1);
+        s.onboard_slots = Some(BTreeMap::from([(1, vec![0u8; cmd::PROFILE_HEADER_LEN])]));
         s.leds = vec![4];
         // A HyperScroll wheel as a Naga V3 Pro showed it: tactile, all modes in the cycle,
         // acceleration and Smart-Reel off at medium.
@@ -2406,5 +2534,261 @@ mod tests {
         let mut store = crate::Store::default();
         store.for_device(&da).active_mut().dpi = Some((400, 400));
         assert_eq!(store.for_device(&db).active().dpi, None);
+    }
+
+    /// A transport wrapper that injects one stale `02:8C` reply (from the live slot) before
+    /// letting the real reply through, modelling a wireless receiver returning a cached reply.
+    struct StaleButtonReply {
+        inner: Sim,
+        stale: Mutex<Option<[u8; REPORT_LEN]>>,
+        injected: Mutex<bool>,
+    }
+
+    impl Transport for StaleButtonReply {
+        fn send_feature_report(&self, data: &[u8]) -> Result<()> {
+            let cmd = Command::new(data[7], data[8]);
+            // Trigger once when reading slot 1 of button 5 (Normal layer).
+            if cmd == cmd::BUTTON.get() && data[9] == 1 && data[10] == 5 && data[11] == 0 {
+                let mut done = self.injected.lock().unwrap();
+                if !*done {
+                    *done = true;
+                    // Stale reply for live slot (0), button 5, Normal layer, holding key:f13.
+                    let mut b = [0u8; REPORT_LEN];
+                    b[0] = 2; // Status::Success
+                    b[1] = data[2];
+                    b[5] = cmd::BUTTON_SIZE;
+                    b[6] = cmd.class;
+                    b[7] = cmd.id;
+                    b[8..18].copy_from_slice(&[0, 5, 0, 2, 1, 0, 0x68, 0, 0, 0]);
+                    b[88] = checksum(&b);
+                    *self.stale.lock().unwrap() = Some(b);
+                }
+            }
+            self.inner.send_feature_report(data)
+        }
+
+        fn get_feature_report(&self, buf: &mut [u8]) -> Result<usize> {
+            if let Some(stale) = self.stale.lock().unwrap().take() {
+                buf[0] = 0;
+                buf[1..=REPORT_LEN].copy_from_slice(&stale);
+                return Ok(REPORT_LEN + 1);
+            }
+            self.inner.get_feature_report(buf)
+        }
+
+        fn read_delay(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn save_to_mouse_ignores_stale_button_replies() {
+        use crate::buttons::{Action, Layer};
+        let sim = Sim::mouse();
+        let factory = Action::Mouse(5);
+        let f13 = Action::Key { modifiers: 0, usage: 0x68 };
+        let transport = StaleButtonReply {
+            inner: sim.clone(),
+            stale: Mutex::new(None),
+            injected: Mutex::new(false),
+        };
+        let dev = Device::open(
+            Box::new(transport),
+            MOUSE_PID,
+            0,
+            CString::new("sim:stale").unwrap(),
+            &TXID_CANDIDATES,
+            Sim::spec_for(MOUSE_PID),
+        )
+        .expect("wrapper opens");
+        let path = std::env::temp_dir().join(format!("secbird-stale-btn-{}.json", std::process::id()));
+        let mut store = crate::Store::load(&path).unwrap();
+        crate::actions::set_button(&dev, &mut store, "side-forward", Layer::Normal, Some(f13)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_mouse(&dev, &mut store).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 5, Layer::Normal).unwrap(), f13);
+        let save = store.for_device(&dev).onboard.as_ref().unwrap();
+        assert_eq!(save.before["side-forward"], factory.to_string());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A transport wrapper that acknowledges `drop_writes` on-board `02:0C` writes with
+    /// `Status::Success` without persisting them to `Sim`.
+    struct FlakySlotFlash {
+        inner: Sim,
+        drop_writes: Mutex<u32>,
+        fake_ok: Mutex<Option<[u8; REPORT_LEN]>>,
+    }
+
+    impl Transport for FlakySlotFlash {
+        fn send_feature_report(&self, data: &[u8]) -> Result<()> {
+            let cmd = Command::new(data[7], data[8]);
+            if cmd == cmd::BUTTON && data[9] >= 1 {
+                let mut remaining = self.drop_writes.lock().unwrap();
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    let mut b = [0u8; REPORT_LEN];
+                    b.copy_from_slice(&data[1..=REPORT_LEN]);
+                    b[0] = 2; // Status::Success
+                    b[88] = checksum(&b);
+                    *self.fake_ok.lock().unwrap() = Some(b);
+                    return Ok(());
+                }
+            }
+            self.inner.send_feature_report(data)
+        }
+
+        fn get_feature_report(&self, buf: &mut [u8]) -> Result<usize> {
+            if let Some(rep) = self.fake_ok.lock().unwrap().take() {
+                buf[0] = 0;
+                buf[1..=REPORT_LEN].copy_from_slice(&rep);
+                return Ok(REPORT_LEN + 1);
+            }
+            self.inner.get_feature_report(buf)
+        }
+
+        fn read_delay(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn save_to_mouse_retries_dropped_flash_writes_and_reports_unkept_slots() {
+        use crate::buttons::{Action, Layer};
+        let f13 = Action::Key { modifiers: 0, usage: 0x68 };
+
+        // One silently dropped flash write is caught by read-back and succeeds on retry.
+        let sim = Sim::mouse();
+        let dev = Device::open(
+            Box::new(FlakySlotFlash {
+                inner: sim.clone(),
+                drop_writes: Mutex::new(1),
+                fake_ok: Mutex::new(None),
+            }),
+            MOUSE_PID,
+            0,
+            CString::new("sim:flaky1").unwrap(),
+            &TXID_CANDIDATES,
+            Sim::spec_for(MOUSE_PID),
+        )
+        .unwrap();
+        dev.set_slot_button(1, 5, Layer::Normal, f13).unwrap();
+        assert_eq!(dev.slot_button(1, 5, Layer::Normal).unwrap(), f13);
+
+        // Permanently ignored flash writes surface an error instead of silently succeeding.
+        let sim2 = Sim::mouse();
+        let dev2 = Device::open(
+            Box::new(FlakySlotFlash {
+                inner: sim2,
+                drop_writes: Mutex::new(10),
+                fake_ok: Mutex::new(None),
+            }),
+            MOUSE_PID,
+            0,
+            CString::new("sim:flaky10").unwrap(),
+            &TXID_CANDIDATES,
+            Sim::spec_for(MOUSE_PID),
+        )
+        .unwrap();
+        let err = dev2.set_slot_button(1, 5, Layer::Normal, f13).unwrap_err().to_string();
+        assert!(err.contains("didn't keep"), "{err}");
+    }
+
+    #[test]
+    fn naga_v3_pro_button_ids_and_save_to_mouse() {
+        use crate::buttons::{button_name, Action, Layer};
+        // Exact 33 button ids from Naga V3 Pro (00E8) `02:84` report (#91).
+        const NAGA_V3_IDS: [u8; 33] = [
+            0x01, 0x02, 0x0B, 0x0C, 0x0E, 0x03, 0x34, 0x35, 0x6A, 0x39, 0x80,
+            0x42, 0x41, 0x40, 0x45, 0x44, 0x43, 0x48, 0x47, 0x46, 0x4B, 0x4A, 0x49,
+            0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x05, 0x04, 0x09, 0x0A,
+        ];
+        let mut s = SimState::new("SIMNAGAV3001");
+        s.dpi = Some((1400, 1400));
+        s.leds = vec![1, 4, 5];
+        s.active_slot = Some(1);
+        let defs: Vec<(u8, u8, [u8; 5])> = NAGA_V3_IDS
+            .iter()
+            .map(|&id| (id, if id == 1 { 1 } else { 2 }, [if id == 1 { 1 } else { 0 }, 0x1E, 0, 0, 0]))
+            .collect();
+        with_buttons(&mut s, &defs);
+        s.button_list = Some(NAGA_V3_IDS.to_vec());
+
+        let db = crate::Db::builtin().unwrap();
+        let dev = Sim::new(s).open(0x00E8, db.spec(0x00E8)).expect("Naga V3 Pro opens");
+        let ids = dev.button_ids().expect("button_ids");
+        assert_eq!(ids.len(), 33);
+        assert!(ids.iter().all(|&id| !button_name(id).starts_with("button-")), "every Naga V3 Pro id is named");
+        assert_eq!(dev.polling_rate().unwrap(), 1000);
+
+        let path = std::env::temp_dir().join(format!("secbird-nagav3-{}.json", std::process::id()));
+        let mut store = crate::Store::load(&path).unwrap();
+        let f13 = Action::Key { modifiers: 0, usage: 0x68 };
+        crate::actions::set_button(&dev, &mut store, "grid-1", Layer::Normal, Some(f13)).unwrap();
+        crate::actions::set_button(&dev, &mut store, "side-extra", Layer::Normal, Some(f13)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_mouse(&dev, &mut store).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), f13);
+        assert_eq!(dev.slot_button(1, 0x80, Layer::Normal).unwrap(), f13);
+        assert_eq!(crate::actions::put_back_onboard(&dev, &mut store).unwrap(), 2);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn onboard_slot_lifecycle() {
+        let dev = Sim::naga().open(NAGA_PID, Sim::spec_for(NAGA_PID)).unwrap();
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1]);
+        assert_eq!(dev.active_onboard_slot().unwrap(), 1);
+        assert!(dev.delete_onboard_slot(1).is_err(), "cannot delete last slot");
+
+        dev.create_onboard_slot(2, Some("MMO Raid")).unwrap();
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1, 2]);
+        assert_eq!(dev.onboard_slot_name(2).unwrap(), "MMO Raid");
+
+        dev.set_active_onboard_slot(2).unwrap();
+        assert_eq!(dev.active_onboard_slot().unwrap(), 2);
+        let slots = dev.onboard_slots().unwrap();
+        assert_eq!(slots.len(), 2);
+        assert!(!slots[0].active);
+        assert!(slots[1].active);
+        assert_eq!(slots[1].name, "MMO Raid");
+
+        // Deleting the active slot switches to another existing slot first.
+        dev.delete_onboard_slot(2).unwrap();
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1]);
+        assert_eq!(dev.active_onboard_slot().unwrap(), 1);
+    }
+
+    #[test]
+    fn save_buttons_to_multiple_slots_independently() {
+        use crate::buttons::{Action, Layer};
+        let dev = Sim::naga().open(NAGA_PID, Sim::spec_for(NAGA_PID)).unwrap();
+        let path = std::env::temp_dir().join(format!("secbird-multislot-{}.json", std::process::id()));
+        let mut store = crate::Store::load(&path).unwrap();
+
+        let key_u = Action::Key { modifiers: 0, usage: 0x18 };
+        let key_p = Action::Key { modifiers: 0, usage: 0x13 };
+
+        // Save Default (grid-1 -> u) to slot 1.
+        crate::actions::set_button(&dev, &mut store, "grid-1", Layer::Normal, Some(key_u)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_slot(&dev, &mut store, 1).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), key_u);
+
+        // Create a second software profile "Raid" (grid-1 -> p) and save to slot 2 (auto-creates slot 2).
+        store.for_device(&dev).create("Raid").unwrap();
+        store.for_device(&dev).switch("Raid").unwrap();
+        crate::actions::set_button(&dev, &mut store, "grid-1", Layer::Normal, Some(key_p)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_slot(&dev, &mut store, 2).unwrap(), 2);
+
+        // Slot 1 still has Default's remap; slot 2 has Raid's remap and name.
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1, 2]);
+        assert_eq!(dev.onboard_slot_name(2).unwrap(), "Raid");
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), key_u);
+        assert_eq!(dev.slot_button(2, 0x40, Layer::Normal).unwrap(), key_p);
+
+        // Putting back slot 2 leaves slot 1 intact.
+        assert_eq!(crate::actions::put_back_slot(&dev, &mut store, 2).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), key_u);
+        assert_ne!(dev.slot_button(2, 0x40, Layer::Normal).unwrap(), key_p);
+
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Multiple hardware on-board profile slots (1–5) on supported mice without Razer Synapse:
+  list, create, switch, and delete slots (`05:80`, `05:81`, `05:02`, `05:03`, `05:04`/`05:84`,
+  `05:08`/`05:88`) from `secbird slot` / `secbird button save-to-mouse --slot N` and from
+  "Saved on the mouse" in the editor, with independent per-slot backups.
+- Command line: `-v` / `--verbose` (or `SECBIRD_TRACE=1`) prints Protocol 2.5 requests and
+  replies to stderr for diagnosing device issues; serial replies are redacted.
+
+### Fixed
+- Naga V3 Pro (Wireless, `00E8`): uses interface 3 and standard polling (`00:85`), matching
+  its device report (`00:C0` returns `NotSupported`, #91).
+- Button remapping and "Save to mouse": reads and writes now require replies to echo the
+  requested `[slot, button]` bytes (avoiding stale replies on wireless receivers while
+  accepting the Naga V3 Pro's `args[2]` reply byte), and on-board slot writes (`02:0C`)
+  are read back and retried up to 3 times, returning an error if the device doesn't keep
+  the assignment.
+
 ## [0.6.1] - 2026-11-21
 
 ### Added

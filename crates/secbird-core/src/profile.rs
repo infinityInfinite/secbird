@@ -97,9 +97,12 @@ pub struct DeviceProfiles {
     /// Leave this device's lighting to another app, across every profile.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lighting_off: bool,
-    /// Button remaps written into the mouse's own memory with "Save to mouse".
+    /// Button remaps written into the mouse's own memory with "Save to mouse" (legacy single-slot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub onboard: Option<OnboardSave>,
+    /// Per-slot backups for multi-slot on-board profile saves (slot 1-5 -> save record).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub onboard_slots: BTreeMap<u8, OnboardSave>,
     /// Where each key of the per-key grid sits, as the editor draws it, so the tray can run
     /// waves across the real keyboard and light the key pressed. Empty until the editor
     /// has shown the board.
@@ -130,12 +133,47 @@ impl Default for DeviceProfiles {
             profiles: BTreeMap::from([(DEFAULT_PROFILE.into(), Profile::default())]),
             lighting_off: false,
             onboard: None,
+            onboard_slots: BTreeMap::new(),
             layout: Vec::new(),
         }
     }
 }
 
 impl DeviceProfiles {
+    /// Recorded on-board save for `slot` (1-5), checking per-slot saves and the legacy field.
+    pub fn onboard_save(&self, slot: u8) -> Option<&OnboardSave> {
+        self.onboard_slots
+            .get(&slot)
+            .or_else(|| self.onboard.as_ref().filter(|o| o.slot == slot))
+    }
+
+    /// Record an on-board save for `save.slot`, keeping the legacy `onboard` field in sync.
+    pub fn set_onboard_save(&mut self, save: OnboardSave) {
+        self.onboard_slots.insert(save.slot, save.clone());
+        self.onboard = Some(save);
+    }
+
+    /// Remove the recorded on-board save for `slot`, returning it if present.
+    pub fn remove_onboard_save(&mut self, slot: u8) -> Option<OnboardSave> {
+        let mut removed = self.onboard_slots.remove(&slot);
+        if self.onboard.as_ref().is_some_and(|o| o.slot == slot) {
+            let legacy = self.onboard.take();
+            if removed.is_none() {
+                removed = legacy;
+            }
+            self.onboard = self.onboard_slots.values().next().cloned();
+        }
+        removed
+    }
+
+    /// All recorded on-board saves across slots (sorted by slot id).
+    pub fn all_onboard_saves(&self) -> Vec<OnboardSave> {
+        let mut map = self.onboard_slots.clone();
+        if let Some(o) = &self.onboard {
+            map.entry(o.slot).or_insert_with(|| o.clone());
+        }
+        map.into_values().collect()
+    }
     pub fn active(&self) -> &Profile {
         &self.profiles[&self.active]
     }
@@ -341,6 +379,7 @@ impl Store {
                 lighting_off: incoming.lighting_off,
                 // The only copy of what the mouse's slot held before a "Save to mouse".
                 onboard: incoming.onboard.clone(),
+                onboard_slots: incoming.onboard_slots.clone(),
                 layout: incoming.layout.clone(),
             });
             for (name, profile) in incoming.profiles {

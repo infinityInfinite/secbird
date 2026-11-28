@@ -263,8 +263,9 @@ fn keeps_a_left_click(dev: &Device, id: u8, layer: crate::buttons::Layer, action
 /// again. A "Save to mouse" is put back first, so this is a full way back. Returns how many
 /// buttons were restored.
 pub fn restore_all_buttons(dev: &Device, store: &mut Store) -> Result<usize> {
-    if store.for_device(dev).onboard.is_some() {
-        put_back_onboard(dev, store)?;
+    let saves = store.for_device(dev).all_onboard_saves();
+    for save in saves {
+        put_back_slot(dev, store, save.slot)?;
     }
     let keys: Vec<String> = store.for_device(dev).active().buttons.keys().cloned().collect();
     let mut restored = 0;
@@ -288,20 +289,37 @@ pub fn restore_all_buttons(dev: &Device, store: &mut Store) -> Result<usize> {
 }
 
 /// "Save to mouse": the active profile's button remaps go into the mouse's active on-board
-/// slot, so they work without Secretarybird. What each button held there before is kept
-/// first (once, so it stays Synapse's or the factory setting), and buttons an earlier save
-/// wrote that this profile doesn't remap go back to it. Returns the slot written.
+/// slot, so they work without Secretarybird. Returns the slot written.
 pub fn save_buttons_to_mouse(dev: &Device, store: &mut Store) -> Result<u8> {
+    save_buttons_to_slot(dev, store, dev.saved_slot())
+}
+
+/// Write the active profile's button remaps into on-board slot `slot` (1-5), creating the
+/// slot first if the mouse doesn't have it yet. What each button held there before is kept
+/// first (once, so it stays Synapse's or the factory setting), and buttons an earlier save
+/// wrote to that same slot that this profile doesn't remap go back to it. Other slots are
+/// left untouched. Returns the slot written.
+pub fn save_buttons_to_slot(dev: &Device, store: &mut Store, slot: u8) -> Result<u8> {
     if dev.buttons().is_empty() {
         return Err(crate::error::Error::Unsupported(format!("{} keeps no button settings on board", dev.name())));
     }
-    let slot = dev.saved_slot();
-    if store.for_device(dev).onboard.as_ref().is_some_and(|o| o.slot != slot) {
-        put_back_onboard(dev, store)?;
+    let max = dev.max_onboard_slots();
+    if !(1..=max).contains(&slot) {
+        return Err(crate::error::Error::InvalidArg(format!("on-board slot {slot}: use 1 to {max}")));
+    }
+    let profile_name = store.for_device(dev).active.clone();
+    // Create the hardware slot if the device reports a slot list and doesn't have it yet;
+    // otherwise update its 250-byte header name (best-effort).
+    if let Ok(ids) = dev.onboard_slot_ids() {
+        if !ids.contains(&slot) {
+            dev.create_onboard_slot(slot, Some(&profile_name))?;
+        } else {
+            let _ = dev.set_onboard_slot_name(slot, &profile_name);
+        }
     }
     let profiles = store.for_device(dev);
     let want = profiles.active().buttons.clone();
-    let mut save = profiles.onboard.clone().unwrap_or_default();
+    let mut save = profiles.onboard_save(slot).cloned().unwrap_or_default();
     // The backup goes to disk before anything is written to the mouse.
     for key in want.keys() {
         if !save.before.contains_key(key) {
@@ -310,7 +328,7 @@ pub fn save_buttons_to_mouse(dev: &Device, store: &mut Store) -> Result<u8> {
         }
     }
     save.slot = slot;
-    profiles.onboard = Some(save.clone());
+    profiles.set_onboard_save(save.clone());
     store.save()?;
 
     for (key, original) in save.before.iter().filter(|(k, _)| !want.contains_key(*k)) {
@@ -325,20 +343,36 @@ pub fn save_buttons_to_mouse(dev: &Device, store: &mut Store) -> Result<u8> {
     save.before.retain(|k, _| want.contains_key(k));
     save.profile = profiles.active.clone();
     save.buttons = want;
-    profiles.onboard = Some(save);
+    profiles.set_onboard_save(save);
     store.save()?;
     Ok(slot)
 }
 
-/// Undo "Save to mouse": the on-board slot gets back what it held before. The live remaps
-/// stay as they are. Returns how many buttons were put back.
+/// Undo "Save to mouse" for the active (or last saved) slot. The live remaps stay as they are.
+/// Returns how many buttons were put back.
 pub fn put_back_onboard(dev: &Device, store: &mut Store) -> Result<usize> {
-    let Some(save) = store.for_device(dev).onboard.clone() else { return Ok(0) };
+    let slot = {
+        let p = store.for_device(dev);
+        let active = dev.saved_slot();
+        if p.onboard_save(active).is_some() {
+            active
+        } else if let Some(o) = &p.onboard {
+            o.slot
+        } else {
+            return Ok(0);
+        }
+    };
+    put_back_slot(dev, store, slot)
+}
+
+/// Undo "Save to mouse" for a specific on-board slot (1-5). Returns how many buttons were put back.
+pub fn put_back_slot(dev: &Device, store: &mut Store, slot: u8) -> Result<usize> {
+    let Some(save) = store.for_device(dev).onboard_save(slot).cloned() else { return Ok(0) };
     for (key, original) in &save.before {
         let (input, layer) = crate::buttons::parse_setting_key(key)?;
         dev.set_slot_input(save.slot, input, layer, original.parse()?)?;
     }
-    store.for_device(dev).onboard = None;
+    store.for_device(dev).remove_onboard_save(slot);
     store.save()?;
     Ok(save.before.len())
 }
