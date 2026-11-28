@@ -337,6 +337,9 @@ struct Body {
     script: String,
     #[serde(default)]
     macro_id: u16,
+    /// On-board profile slot (1-5; 0 = active slot).
+    #[serde(default)]
+    slot: u8,
     /// Lighting effect text (`spectrum`, `wave:left@3`).
     #[serde(default)]
     effect: String,
@@ -381,12 +384,36 @@ fn buttons_json(dev: &Device, store: &mut Store) -> Value {
             })
         })
         .collect();
-    // What "Save to mouse" put in the mouse's slot, and whether that profile changed since.
-    let onboard = onboard.map(|o| {
+    // What "Save to mouse" put in the mouse's slot(s), and whether that profile changed since.
+    let active_slot = dev.active_onboard_slot().unwrap_or(1);
+    let save_json = |o: &secbird_core::profile::OnboardSave| {
         let changed = profiles.profiles.get(&o.profile).map(|p| &p.buttons) != Some(&o.buttons);
         json!({ "slot": o.slot, "profile": o.profile, "count": o.buttons.len(), "changed": changed })
+    };
+    let onboard = profiles
+        .onboard_save(active_slot)
+        .or(profiles.onboard.as_ref())
+        .map(save_json);
+    let onboard_slots: Option<Vec<Value>> = dev.onboard_slots().ok().map(|slots| {
+        slots
+            .into_iter()
+            .map(|s| {
+                json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "active": s.active,
+                    "color": s.color,
+                    "saved": profiles.onboard_save(s.id).map(save_json),
+                })
+            })
+            .collect()
     });
-    json!({ "buttons": list, "onboard": onboard })
+    json!({
+        "buttons": list,
+        "onboard": onboard,
+        "onboard_slots": onboard_slots,
+        "max_slots": dev.max_onboard_slots(),
+    })
 }
 
 fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
@@ -552,11 +579,35 @@ fn post(engine: &mut Engine, path: &str, body: &[u8]) -> Result<Value, Error> {
                 Ok(buttons_json(dev, &mut store))
             }
             "/api/save-to-mouse" => {
-                actions::save_buttons_to_mouse(dev, &mut store)?;
+                if b.slot > 0 {
+                    actions::save_buttons_to_slot(dev, &mut store, b.slot)?;
+                } else {
+                    actions::save_buttons_to_mouse(dev, &mut store)?;
+                }
                 Ok(buttons_json(dev, &mut store))
             }
             "/api/put-back" => {
-                actions::put_back_onboard(dev, &mut store)?;
+                if b.slot > 0 {
+                    actions::put_back_slot(dev, &mut store, b.slot)?;
+                } else {
+                    actions::put_back_onboard(dev, &mut store)?;
+                }
+                Ok(buttons_json(dev, &mut store))
+            }
+            "/api/onboard-slot" => {
+                match b.action.as_str() {
+                    "new" => {
+                        let name = (!b.name.trim().is_empty()).then_some(b.name.trim());
+                        dev.create_onboard_slot(b.slot, name)?;
+                    }
+                    "use" => dev.set_active_onboard_slot(b.slot)?,
+                    "delete" => {
+                        dev.delete_onboard_slot(b.slot)?;
+                        store.for_device(dev).remove_onboard_save(b.slot);
+                        store.save()?;
+                    }
+                    other => return Err(Error::InvalidArg(format!("unknown slot action '{other}'"))),
+                }
                 Ok(buttons_json(dev, &mut store))
             }
             "/api/macros" => macros_json(dev),
