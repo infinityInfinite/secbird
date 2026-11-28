@@ -156,6 +156,10 @@ pub struct SimState {
     /// Active on-board slot (`05:84`), when set. Lighting written to another slot is kept
     /// but not shown, like the DeathStalker V2 Pro in #37.
     pub active_slot: Option<u8>,
+    /// On-board profile slots (`05:*`): slot id (1-5) -> 250-byte header. `None` = no multi-slot support.
+    pub onboard_slots: Option<BTreeMap<u8, Vec<u8>>>,
+    /// Indicator LED colors for on-board slots (`05:0C`/`05:8C`).
+    pub onboard_colors: BTreeMap<u8, [u8; 3]>,
     /// On-device macro memory (`None` = no macros): id -> (header, steps). Sized like a Basilisk V3.
     pub macros: Option<BTreeMap<u16, SimMacro>>,
     /// Bytes freed by deleted macros, not reusable until the memory is compacted.
@@ -217,6 +221,8 @@ impl SimState {
             auto_sleep: None,
             auto_sleep_saved: None,
             active_slot: None,
+            onboard_slots: None,
+            onboard_colors: BTreeMap::new(),
             paired: Vec::new(),
             dock_light: None,
             battery: None,
@@ -258,6 +264,128 @@ impl SimState {
 
     fn hidden_slot(&self, store: u8) -> bool {
         store != 0 && self.active_slot.is_some_and(|slot| slot != store)
+    }
+
+    /// On-board profile slot commands (class 05, from Synapse 4's `obmEngine`).
+    fn handle_onboard(&mut self, c: Command, a: &[u8], size: u8) -> (Status, Vec<u8>) {
+        use Status::{Failed, NotSupported, Success};
+        let ok = |v: Vec<u8>| (Success, v);
+        if self.onboard_slots.is_none() {
+            return if c == cmd::ACTIVE_SLOT.get() {
+                match (self.active_slot, self.buttons.is_empty()) {
+                    (Some(slot), _) => ok(vec![slot]),
+                    (None, true) => (NotSupported, vec![]),
+                    (None, false) => ok(vec![1]),
+                }
+            } else {
+                (NotSupported, vec![])
+            };
+        }
+        match c {
+            c if c == cmd::PROFILE_COUNT.get() => {
+                let n = self.onboard_slots.as_ref().map_or(0, BTreeMap::len) as u8;
+                ok(vec![n])
+            }
+            c if c == cmd::PROFILE_IDS.get() => {
+                let slots = self.onboard_slots.as_ref().unwrap();
+                let mut v = vec![slots.len() as u8];
+                v.extend(slots.keys().copied());
+                ok(v)
+            }
+            cmd::PROFILE_CREATE => {
+                let slot = a[0];
+                if !(1..=cmd::MAX_ONBOARD_SLOTS).contains(&slot) {
+                    return (Failed, vec![]);
+                }
+                let slots = self.onboard_slots.as_mut().unwrap();
+                slots.entry(slot).or_insert_with(|| vec![0u8; cmd::PROFILE_HEADER_LEN]);
+                // Initialize new slot buttons from slot 1 defaults when missing.
+                let defaults: Vec<_> = self
+                    .buttons
+                    .iter()
+                    .filter(|((s, _, _), _)| *s == 1)
+                    .map(|((_, id, layer), &val)| ((*id, *layer), val))
+                    .collect();
+                for ((id, layer), val) in defaults {
+                    self.buttons.entry((slot, id, layer)).or_insert(val);
+                }
+                ok(vec![slot])
+            }
+            cmd::PROFILE_DELETE => {
+                let slot = a[0];
+                let slots = self.onboard_slots.as_mut().unwrap();
+                if !slots.contains_key(&slot) || slots.len() <= 1 {
+                    return (Failed, vec![]);
+                }
+                slots.remove(&slot);
+                self.onboard_colors.remove(&slot);
+                self.buttons.retain(|(s, _, _), _| *s != slot);
+                if self.active_slot == Some(slot) {
+                    self.active_slot = slots.keys().next().copied();
+                }
+                ok(vec![slot])
+            }
+            c if c == cmd::ACTIVE_SLOT.get() => ok(vec![self.active_slot.unwrap_or(1)]),
+            cmd::ACTIVE_SLOT => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                self.active_slot = Some(slot);
+                ok(vec![slot])
+            }
+            c if c == cmd::PROFILE_NAME.get() => {
+                let slot = a[0];
+                let off = u16::from_be_bytes([a[1], a[2]]) as usize;
+                let n = (size as usize).saturating_sub(5);
+                let Some(head) = self.onboard_slots.as_ref().unwrap().get(&slot) else {
+                    return (Failed, vec![]);
+                };
+                if off + n > head.len() {
+                    return (Failed, vec![]);
+                }
+                let mut v = vec![slot, a[1], a[2], a[3], a[4]];
+                v.extend_from_slice(&head[off..off + n]);
+                ok(v)
+            }
+            cmd::PROFILE_NAME => {
+                let slot = a[0];
+                let off = u16::from_be_bytes([a[1], a[2]]) as usize;
+                let n = (size as usize).saturating_sub(5);
+                let Some(head) = self.onboard_slots.as_mut().unwrap().get_mut(&slot) else {
+                    return (Failed, vec![]);
+                };
+                if off + n > head.len() {
+                    return (Failed, vec![]);
+                }
+                head[off..off + n].copy_from_slice(&a[5..5 + n]);
+                ok(a[..size as usize].to_vec())
+            }
+            cmd::PROFILE_RESET => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                ok(vec![slot])
+            }
+            c if c == cmd::PROFILE_COLOR.get() => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                let [r, g, b] = self.onboard_colors.get(&slot).copied().unwrap_or([0xFF, 0xFF, 0xFF]);
+                ok(vec![slot, r, g, b])
+            }
+            cmd::PROFILE_COLOR => {
+                let slot = a[0];
+                if !self.onboard_slots.as_ref().unwrap().contains_key(&slot) {
+                    return (Failed, vec![]);
+                }
+                self.onboard_colors.insert(slot, [a[1], a[2], a[3]]);
+                ok(a[..4].to_vec())
+            }
+            _ => (NotSupported, vec![]),
+        }
     }
 
     /// Macro memory commands, like the Basilisk V3: ids 1-100, 90 KB.
@@ -416,11 +544,7 @@ impl SimState {
                 let ids = self.keys.keys().filter(|k| k.0 == a[0] && k.2 == a[1]).map(|k| k.1);
                 ok([a[0], a[1]].into_iter().chain(ids).collect())
             }
-            c if c == cmd::ACTIVE_SLOT.get() => match (self.active_slot, self.buttons.is_empty()) {
-                (Some(slot), _) => ok(vec![slot]),
-                (None, true) => (NotSupported, vec![]),
-                (None, false) => ok(vec![1]),
-            },
+            c if c.class == 0x05 => self.handle_onboard(c, a, size),
             c if c == cmd::POLLING.get() => ok(vec![self.polling_code]),
             cmd::POLLING => {
                 if cmd::polling_hz(a[0]).is_none() {
@@ -684,6 +808,8 @@ impl Sim {
         s.dpi = Some((800, 800));
         s.dpi_stages = Some((2, vec![(400, 400), (800, 800), (1000, 1000), (1300, 1300), (6400, 6400)]));
         s.macros = Some(BTreeMap::new());
+        s.active_slot = Some(1);
+        s.onboard_slots = Some(BTreeMap::from([(1, vec![0u8; cmd::PROFILE_HEADER_LEN])]));
         s.leds = vec![1, 4, 10];
         // The Basilisk V3's factory buttons, as read from the real mouse, in the live
         // slot and the active saved slot, both layers.
@@ -728,6 +854,8 @@ impl Sim {
         s.idle_seconds = Some(180);
         s.auto_sleep = Some(true);
         s.macros = Some(BTreeMap::new());
+        s.active_slot = Some(1);
+        s.onboard_slots = Some(BTreeMap::from([(1, vec![0u8; cmd::PROFILE_HEADER_LEN])]));
         s.leds = vec![4];
         // A HyperScroll wheel as a Naga V3 Pro showed it: tactile, all modes in the cycle,
         // acceleration and Smart-Reel off at medium.
@@ -2601,6 +2729,66 @@ mod tests {
         assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), f13);
         assert_eq!(dev.slot_button(1, 0x80, Layer::Normal).unwrap(), f13);
         assert_eq!(crate::actions::put_back_onboard(&dev, &mut store).unwrap(), 2);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn onboard_slot_lifecycle() {
+        let dev = Sim::naga().open(NAGA_PID, Sim::spec_for(NAGA_PID)).unwrap();
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1]);
+        assert_eq!(dev.active_onboard_slot().unwrap(), 1);
+        assert!(dev.delete_onboard_slot(1).is_err(), "cannot delete last slot");
+
+        dev.create_onboard_slot(2, Some("MMO Raid")).unwrap();
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1, 2]);
+        assert_eq!(dev.onboard_slot_name(2).unwrap(), "MMO Raid");
+
+        dev.set_active_onboard_slot(2).unwrap();
+        assert_eq!(dev.active_onboard_slot().unwrap(), 2);
+        let slots = dev.onboard_slots().unwrap();
+        assert_eq!(slots.len(), 2);
+        assert!(!slots[0].active);
+        assert!(slots[1].active);
+        assert_eq!(slots[1].name, "MMO Raid");
+
+        // Deleting the active slot switches to another existing slot first.
+        dev.delete_onboard_slot(2).unwrap();
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1]);
+        assert_eq!(dev.active_onboard_slot().unwrap(), 1);
+    }
+
+    #[test]
+    fn save_buttons_to_multiple_slots_independently() {
+        use crate::buttons::{Action, Layer};
+        let dev = Sim::naga().open(NAGA_PID, Sim::spec_for(NAGA_PID)).unwrap();
+        let path = std::env::temp_dir().join(format!("secbird-multislot-{}.json", std::process::id()));
+        let mut store = crate::Store::load(&path).unwrap();
+
+        let key_u = Action::Key { modifiers: 0, usage: 0x18 };
+        let key_p = Action::Key { modifiers: 0, usage: 0x13 };
+
+        // Save Default (grid-1 -> u) to slot 1.
+        crate::actions::set_button(&dev, &mut store, "grid-1", Layer::Normal, Some(key_u)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_slot(&dev, &mut store, 1).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), key_u);
+
+        // Create a second software profile "Raid" (grid-1 -> p) and save to slot 2 (auto-creates slot 2).
+        store.for_device(&dev).create("Raid").unwrap();
+        store.for_device(&dev).switch("Raid").unwrap();
+        crate::actions::set_button(&dev, &mut store, "grid-1", Layer::Normal, Some(key_p)).unwrap();
+        assert_eq!(crate::actions::save_buttons_to_slot(&dev, &mut store, 2).unwrap(), 2);
+
+        // Slot 1 still has Default's remap; slot 2 has Raid's remap and name.
+        assert_eq!(dev.onboard_slot_ids().unwrap(), vec![1, 2]);
+        assert_eq!(dev.onboard_slot_name(2).unwrap(), "Raid");
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), key_u);
+        assert_eq!(dev.slot_button(2, 0x40, Layer::Normal).unwrap(), key_p);
+
+        // Putting back slot 2 leaves slot 1 intact.
+        assert_eq!(crate::actions::put_back_slot(&dev, &mut store, 2).unwrap(), 1);
+        assert_eq!(dev.slot_button(1, 0x40, Layer::Normal).unwrap(), key_u);
+        assert_ne!(dev.slot_button(2, 0x40, Layer::Normal).unwrap(), key_p);
+
         let _ = std::fs::remove_file(&path);
     }
 }

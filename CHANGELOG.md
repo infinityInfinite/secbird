@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- Multiple hardware on-board profile slots (1–5) on supported mice without Razer Synapse:
+  list, create, switch, and delete slots (`05:80`, `05:81`, `05:02`, `05:03`, `05:04`/`05:84`,
+  `05:08`/`05:88`) from `secbird slot` / `secbird button save-to-mouse --slot N` and from
+  "Saved on the mouse" in the editor, with independent per-slot backups.
 - Command line: `-v` / `--verbose` (or `SECBIRD_TRACE=1`) prints Protocol 2.5 requests and
   replies to stderr for diagnosing device issues; serial replies are redacted.
 

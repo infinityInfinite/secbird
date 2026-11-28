@@ -26,6 +26,7 @@ pub mod laptop;
 pub mod log;
 pub mod macros;
 pub mod net;
+pub mod onboard;
 pub mod profile;
 pub mod proto;
 pub mod report;

@@ -190,8 +190,32 @@ pub const SCROLL_SIZE: u8 = 0x02;
 /// Button slot 0 is live and unsaved, and wins over the saved profile slots 1-5.
 /// Verified (Basilisk V3): a remap in slot 0 took effect while slot 1 was active.
 pub const BUTTON_LIVE_SLOT: u8 = 0x00;
-/// Active saved on-board profile slot: `[slot]`. GET verified (Basilisk V3: 1 of 5).
+/// Maximum number of hardware on-board profile slots on Razer mice.
+pub const MAX_ONBOARD_SLOTS: u8 = 5;
+/// On-board profile slots (class 05, from Synapse 4's `obmEngine` / `rzDevice25`).
+/// Number of saved on-board profiles: GET only, `[count]`.
+pub const PROFILE_COUNT: Command = Command::new(0x05, 0x00);
+pub const PROFILE_COUNT_SIZE: u8 = 0x01;
+/// Saved on-board profile slot ids: GET only, `[total, id1, id2, ...]`.
+pub const PROFILE_IDS: Command = Command::new(0x05, 0x01);
+pub const PROFILE_IDS_SIZE: u8 = 0x50;
+/// Create a new on-board profile slot: SET `[slot]` (1-5).
+pub const PROFILE_CREATE: Command = Command::new(0x05, 0x02);
+/// Delete an on-board profile slot: SET `[slot]` (1-5).
+pub const PROFILE_DELETE: Command = Command::new(0x05, 0x03);
+/// Active saved on-board profile slot: `[slot]` (1-5). GET verified (Basilisk V3, Naga V3 Pro).
 pub const ACTIVE_SLOT: Command = Command::new(0x05, 0x04);
+pub const PROFILE_SLOT_SIZE: u8 = 0x01;
+/// 250-byte on-board profile header (16-byte guid, 100-byte UTF-8 name, 128-byte owner,
+/// 6-byte hash): `[slot, offset u16, total_size u16, data...]`, at most 64 data bytes per report.
+pub const PROFILE_NAME: Command = Command::new(0x05, 0x08);
+pub const PROFILE_NAME_CHUNK: usize = 64;
+pub const PROFILE_HEADER_LEN: usize = 250;
+/// Reset an on-board profile slot to factory defaults: SET `[slot]` (1-5).
+pub const PROFILE_RESET: Command = Command::new(0x05, 0x0B);
+/// Indicator LED color of an on-board profile slot: `[slot, r, g, b]`.
+pub const PROFILE_COLOR: Command = Command::new(0x05, 0x0C);
+pub const PROFILE_COLOR_SIZE: u8 = 0x04;
 
 /// Polling rate code (sent to the device) for a rate in Hz.
 pub fn polling_code(hz: u32) -> Option<u8> {
