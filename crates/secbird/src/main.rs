@@ -135,6 +135,7 @@ UPDATES:
 
 OPTIONS:
   -V       Show the version (also --version)
+  -v       Print Protocol 2.5 requests and replies to stderr (also --verbose, SECBIRD_TRACE=1)
   -d ID    Pick a device by USB product id (0099) or serial, when several are connected
 
 Set SECBIRD_SIM=all (or a list: mouse,wireless,keyboard,old-keyboard,naga,cobra,dock,blackwidow,
@@ -154,6 +155,10 @@ fn main() -> ExitCode {
 }
 
 fn run(mut args: Vec<String>) -> Result<(), Error> {
+    if let Some(i) = args.iter().position(|a| matches!(a.as_str(), "-v" | "--verbose")) {
+        secbird_core::device::set_trace(true);
+        args.remove(i);
+    }
     // -d takes a product id (0099), a device key (0099:AB1234C56789012) or a serial.
     let mut selector: Option<String> = None;
     if let Some(i) = args.iter().position(|a| a == "-d") {

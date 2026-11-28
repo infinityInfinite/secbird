@@ -9,7 +9,33 @@ use hidapi::HidApi;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::CString;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::thread::sleep;
+
+static TRACE: AtomicBool = AtomicBool::new(false);
+static TRACE_ENV: OnceLock<bool> = OnceLock::new();
+
+/// Log every Protocol 2.5 request and reply to stderr (serial replies are redacted).
+/// Also enabled when `SECBIRD_TRACE` is set to a non-empty value other than `0`.
+pub fn set_trace(enabled: bool) {
+    TRACE.store(enabled, Ordering::Relaxed);
+}
+
+fn trace_enabled() -> bool {
+    TRACE.load(Ordering::Relaxed)
+        || *TRACE_ENV.get_or_init(|| {
+            std::env::var("SECBIRD_TRACE").is_ok_and(|v| !v.is_empty() && v != "0")
+        })
+}
+
+fn trace_reply(rep: &Report, note: &str) {
+    if rep.command() == cmd::SERIAL.get() && rep.status() == Status::Success {
+        eprintln!("[trace] <- Report[Success tx={:02X} cmd=00:82 <redacted>]{note}", rep.txid());
+    } else {
+        eprintln!("[trace] <- {rep:?}{note}");
+    }
+}
 
 /// Synapse retries reads up to 30 times (5 ms apart, see [`Transport::read_delay`]).
 const READ_RETRIES: u32 = 30;
@@ -286,6 +312,10 @@ fn transact(
     echo: &[u8],
 ) -> Result<Report> {
     let req = Report::request(txid, command, size, args);
+    let tracing = trace_enabled();
+    if tracing {
+        eprintln!("[trace] -> {req:?}");
+    }
     let mut buf = [0u8; REPORT_LEN + 1]; // byte 0 is the HID report id (0)
     buf[1..].copy_from_slice(&req.0);
     hid.send_feature_report(&buf)?;
@@ -301,6 +331,9 @@ fn transact(
         body.copy_from_slice(&reply[n - REPORT_LEN..n]);
         let rep = Report(body);
         if rep.command() != command || (exact && rep.txid() != txid) {
+            if tracing {
+                trace_reply(&rep, " (ignored: command/txid mismatch)");
+            }
             continue;
         }
         // The echo check only sorts out successful replies meant for another request. A
@@ -308,13 +341,22 @@ fn transact(
         // would turn "not supported" into a slow "no reply" after every resend.
         let status = rep.status();
         if !rep.args().starts_with(echo) && matches!(status, Status::Success | Status::Busy | Status::New) {
+            if tracing {
+                trace_reply(&rep, " (ignored: echo mismatch)");
+            }
             continue;
+        }
+        if tracing {
+            trace_reply(&rep, "");
         }
         match status {
             Status::Success => return Ok(rep),
             Status::Busy | Status::New => continue,
             status => return Err(Error::Device { cmd: command, status }),
         }
+    }
+    if tracing {
+        eprintln!("[trace] <- no reply for {command}");
     }
     Err(Error::NoReply(command))
 }
